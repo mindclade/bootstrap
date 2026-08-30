@@ -470,27 +470,30 @@ type workflowContract struct {
 	runners      map[string]any
 	environments map[string]string
 	actions      []string
+	reusableJobs map[string]string
 }
 
 var workflowContracts = map[string]workflowContract{
 	".github/workflows/pull-request.yml": {
 		triggers: []string{"merge_group", "pull_request", "push", "workflow_dispatch"},
 		jobs: map[string]map[string]string{
-			"required": nil,
+			"validate": nil,
+			"required": {},
 		},
 		runners: map[string]any{
+			"validate": nil,
 			"required": "ubuntu-24.04",
 		},
 		environments: map[string]string{},
-		actions: []string{
-			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-			"DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25",
+		actions:      []string{},
+		reusableJobs: map[string]string{
+			"validate": "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
 		},
 	},
 	".github/workflows/protected-apply.yml": {
 		triggers: []string{"workflow_dispatch"},
 		jobs: map[string]map[string]string{
-			"plan":  {"contents": "read", "id-token": "write"},
+			"plan":  {"actions": "read", "contents": "read", "id-token": "write"},
 			"apply": {"actions": "read", "contents": "read", "id-token": "write"},
 		},
 		runners: map[string]any{
@@ -580,7 +583,7 @@ func validateWorkflowSecurity(root string) error {
 			problems = append(problems, relative+" must default to contents: read only")
 		}
 		environment, _ := workflow["env"].(map[string]any)
-		if environment["TOFU_VERSION"] != qualifiedTofuVersion {
+		if relative != ".github/workflows/pull-request.yml" && environment["TOFU_VERSION"] != qualifiedTofuVersion {
 			problems = append(problems, relative+" must pin the qualified OpenTofu version "+qualifiedTofuVersion)
 		}
 
@@ -589,11 +592,23 @@ func validateWorkflowSecurity(root string) error {
 			problems = append(problems, fmt.Sprintf("%s must contain exactly the approved jobs", relative))
 			continue
 		}
-		var actions []string
+		actions := make([]string, 0)
 		for jobName, expectedPermissions := range contract.jobs {
 			job, ok := jobs[jobName].(map[string]any)
 			if !ok {
 				problems = append(problems, fmt.Sprintf("%s job %s must be an object", relative, jobName))
+				continue
+			}
+			if expectedReusable, reusable := contract.reusableJobs[jobName]; reusable {
+				if job["uses"] != expectedReusable {
+					problems = append(problems, fmt.Sprintf("%s job %s must pin the exact approved reusable workflow", relative, jobName))
+				}
+				expectedInputs := map[string]any{
+					"source_revision": "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}",
+				}
+				if !reflect.DeepEqual(job["with"], expectedInputs) || job["secrets"] != nil || job["steps"] != nil || job["runs-on"] != nil || job["permissions"] != nil {
+					problems = append(problems, fmt.Sprintf("%s job %s must use the exact secretless reusable-workflow contract", relative, jobName))
+				}
 				continue
 			}
 			if !reflect.DeepEqual(job["runs-on"], contract.runners[jobName]) {
@@ -657,6 +672,9 @@ func validateWorkflowSecurity(root string) error {
 	if err := validateTerminalSourceRechecks(root); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := validateProtectedApplyContract(root); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if err := validateRecoveryWorkflowContract(root); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -689,7 +707,7 @@ func validateRecoveryWorkflowContract(root string) error {
 		problems = append(problems, "workflow name must remain recovery-verification")
 	}
 	if !exactStringMap(workflow["env"], map[string]string{
-		"GO_VERSION": "1.26.7", "JUST_VERSION": "1.55.1", "PYTHON_VERSION": "3.14.7",
+		"GO_VERSION": "1.26.7", "JUST_VERSION": "1.58.0", "PYTHON_VERSION": "3.14.7",
 		"TOFU_VERSION": qualifiedTofuVersion, "USE_BAZEL_VERSION": "9.1.1",
 	}) {
 		problems = append(problems, "recovery workflow tool versions must equal the exact qualified set")
@@ -922,6 +940,62 @@ func validateRecoveryWorkflowContract(root string) error {
 	return nil
 }
 
+func validateProtectedApplyContract(root string) error {
+	path := filepath.Join(root, ".github", "workflows", "protected-apply.yml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	content := string(raw)
+	required := map[string]string{
+		"source-bound run name":                   `run-name: protected-${{ inputs.operation }} / ${{ inputs.root }} / ${{ inputs.source_sha }}`,
+		"private artifact transport gate":         `test "${REPOSITORY_VISIBILITY}" = "private"`,
+		"live branch-protection check":            `.protected == true`,
+		"qualified required-check verification":   `.name == "required"`,
+		"qualified source-workflow verification":  `.github/workflows/pull-request.yml`,
+		"exact artifact-ID download":              `artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}`,
+		"artifact archive digest verification":    `digest-mismatch: error`,
+		"bounded top-level bundle verification":   `find "${bundle}" -mindepth 1 -maxdepth 1 -printf`,
+		"symlink-resistant bundle verification":   `test -L "${path}"`,
+		"strict plan expiry":                      `test "${now_epoch}" -lt "${expires_epoch}"`,
+		"isolated OpenTofu runtime data":          `TF_DATA_DIR="${target_data}"`,
+		"pre-publication credential removal":      "Remove plan credentials before artifact publication",
+		"terminal plan cleanup":                   "Remove plan credentials and generated runtime files",
+		"terminal apply cleanup":                  "Remove apply credentials and generated runtime files",
+		"artifact provenance run-attempt binding": `and (.runAttempt == $runAttempt)`,
+	}
+	var problems []string
+	for description, fragment := range required {
+		if !strings.Contains(content, fragment) {
+			problems = append(problems, "missing "+description)
+		}
+	}
+	if strings.Contains(content, `\n  direct {\n`) {
+		problems = append(problems, "provider installation must not permit direct registry fallback")
+	}
+	counts := map[string]struct {
+		fragment string
+		minimum  int
+	}{
+		"first-attempt-only dispatch enforcement": {fragment: `test "${GITHUB_RUN_ATTEMPT}" = "1"`, minimum: 2},
+		"private plan-artifact transport gates":   {fragment: `test "${REPOSITORY_VISIBILITY}" = "private"`, minimum: 2},
+		"initial and terminal branch protection":  {fragment: `.protected == true`, minimum: 3},
+		"manual credential cleanup":               {fragment: "cleanup_credentials: false", minimum: 2},
+		"allowlist-only provider mirrors":         {fragment: "Prepare the exact reviewed Google provider package", minimum: 2},
+		"initial and terminal approval checks":    {fragment: `"${RUNNER_TEMP}/bootstrapctl" approval verify`, minimum: 2},
+	}
+	for description, check := range counts {
+		if strings.Count(content, check.fragment) < check.minimum {
+			problems = append(problems, "missing "+description)
+		}
+	}
+	if len(problems) != 0 {
+		sort.Strings(problems)
+		return fmt.Errorf(".github/workflows/protected-apply.yml hardened contract failed: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
 func validateTerminalSourceRechecks(root string) error {
 	checks := []struct {
 		path      string
@@ -934,7 +1008,8 @@ func validateTerminalSourceRechecks(root string) error {
 	}{
 		{
 			path: ".github/workflows/protected-apply.yml", job: "apply", step: "Apply only the verified saved plan",
-			sha: `test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"`, mutation: `tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" apply`,
+			sha: `test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"`, tracked: "git diff --exit-code -- .",
+			untracked: `test -z "$(git status --porcelain=v1 --untracked-files=all)"`, mutation: `tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" apply`,
 		},
 		{
 			path: ".github/workflows/recovery-verification.yml", job: "observation", step: "Render and KMS-sign redacted non-qualifying observation evidence",
@@ -967,7 +1042,9 @@ func validateTerminalSourceRechecks(root string) error {
 		untrackedIndex := strings.LastIndex(run, check.untracked)
 		mainIndex := strings.LastIndex(run, `gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha`)
 		mutationIndex := strings.LastIndex(run, check.mutation)
-		cleanChecksValid := check.tracked == "" || (trackedIndex >= 0 && untrackedIndex >= 0 && trackedIndex < untrackedIndex && untrackedIndex < shaIndex)
+		cleanChecksValid := check.tracked == "" || (trackedIndex >= 0 && untrackedIndex >= 0 && trackedIndex < untrackedIndex &&
+			((check.path == ".github/workflows/protected-apply.yml" && shaIndex < trackedIndex && untrackedIndex < mainIndex) ||
+				(check.path != ".github/workflows/protected-apply.yml" && untrackedIndex < shaIndex)))
 		if run == "" || !hasToken || shaIndex < 0 || mainIndex < 0 || mutationIndex < 0 || !cleanChecksValid || shaIndex > mainIndex || mainIndex > mutationIndex {
 			return fmt.Errorf("%s job %s must recheck the checkout and live main SHA immediately before %s", check.path, check.job, check.mutation)
 		}

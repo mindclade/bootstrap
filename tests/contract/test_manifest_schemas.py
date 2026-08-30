@@ -738,10 +738,37 @@ class ManifestSchemaContractTest(unittest.TestCase):
         for content in (justfile, workflow):
             self.assertIn("providers mirror", content)
             self.assertIn("filesystem_mirror", content)
-            self.assertIn('exclude = ["hashicorp/google"]', content)
             self.assertIn("terraform-provider-google_7.42.0_", content)
             self.assertIn('version     = "7.42.0"', content)
+        self.assertIn('exclude = ["hashicorp/google"]', justfile)
+        self.assertNotIn('exclude = ["hashicorp/google"]', workflow)
         self.assertGreaterEqual(workflow.count("Prepare the exact reviewed Google provider package"), 2)
+
+    def test_protected_apply_uses_hardened_plan_transport_and_terminal_checks(self):
+        workflow = (
+            self.repository_root / ".github" / "workflows" / "protected-apply.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "run-name: protected-${{ inputs.operation }} / ${{ inputs.root }} / ${{ inputs.source_sha }}",
+            workflow,
+        )
+        self.assertGreaterEqual(
+            workflow.count('test "${REPOSITORY_VISIBILITY}" = "private"'), 2
+        )
+        self.assertGreaterEqual(workflow.count(".protected == true"), 3)
+        self.assertIn('.name == "required"', workflow)
+        self.assertIn(
+            "artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}", workflow
+        )
+        self.assertIn("digest-mismatch: error", workflow)
+        self.assertIn("PLAN_ARTIFACT_DIGEST", workflow)
+        self.assertIn("find \"${bundle}\" -mindepth 1 -maxdepth 1 -printf", workflow)
+        self.assertNotIn("\\n  direct {\\n", workflow)
+        self.assertGreaterEqual(
+            workflow.count('"${RUNNER_TEMP}/bootstrapctl" approval verify'), 2
+        )
+        self.assertIn("Remove plan credentials before artifact publication", workflow)
+        self.assertIn("Remove apply credentials and generated runtime files", workflow)
 
     def test_custom_role_bindings_use_known_canonical_role_ids(self):
         cases = (
@@ -859,12 +886,12 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertIn("--initial-local-backend", readme)
 
     def test_source_qualification_installs_exact_hash_verified_just(self):
-        checksum = "b0ef600f0df20d5ae91ae931627c499fc52b477ffe5f5ea7b7b3ec616b16c778"
+        checksum = "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
         for name in ("recovery-verification.yml",):
             workflow = (
                 self.repository_root / ".github" / "workflows" / name
             ).read_text(encoding="utf-8")
-            self.assertIn('JUST_VERSION: "1.55.1"', workflow)
+            self.assertIn('JUST_VERSION: "1.58.0"', workflow)
             self.assertIn(checksum, workflow)
             self.assertIn("just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz", workflow)
             self.assertIn("sha256sum --check --strict", workflow)
@@ -875,22 +902,19 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.repository_root / ".github" / "workflows" / "pull-request.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25",
+            "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
             workflow,
         )
-        self.assertIn("nix build --no-update-lock-file .#toolchain", workflow)
-        self.assertIn("nix flake check --no-update-lock-file", workflow)
-        self.assertIn(
-            "nix develop --no-update-lock-file .#ci --command just ci", workflow
-        )
+        self.assertIn("VALIDATE_RESULT: ${{ needs.validate.result }}", workflow)
+        self.assertIn('test "${VALIDATE_RESULT}" = success', workflow)
 
     def test_workflow_security_contract_fails_closed(self):
         cases = (
             (
                 ".github/workflows/pull-request.yml",
-                "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-                "actions/checkout@v7",
-                "exact immutable allowlist",
+                "reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
+                "reusable-nix-validation.yml@main",
+                "exact approved reusable workflow",
             ),
             (
                 ".github/workflows/pull-request.yml",
@@ -909,6 +933,24 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "    environment: trusted-build\n",
                 "    environment: unapproved-plan\n",
                 "job plan must use environment trusted-build",
+            ),
+            (
+                ".github/workflows/protected-apply.yml",
+                'test "${REPOSITORY_VISIBILITY}" = "private"',
+                'test "${REPOSITORY_VISIBILITY}" = "public"',
+                "private plan-artifact transport gates",
+            ),
+            (
+                ".github/workflows/protected-apply.yml",
+                "artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}",
+                "name: bootstrap-plan",
+                "exact artifact-ID download",
+            ),
+            (
+                ".github/workflows/protected-apply.yml",
+                'include = ["hashicorp/google"]\\n  }\\n}\\n',
+                'include = ["hashicorp/google"]\\n  }\\n  direct {\\n    exclude = ["hashicorp/google"]\\n  }\\n}\\n',
+                "must not permit direct registry fallback",
             ),
             (
                 ".github/workflows/recovery-verification.yml",

@@ -1,5 +1,7 @@
 name: protected-apply
 
+run-name: protected-${{ inputs.operation }} / ${{ inputs.root }} / ${{ inputs.source_sha }}
+
 "on":
   workflow_dispatch:
     inputs:
@@ -11,14 +13,14 @@ name: protected-apply
           - plan
           - apply
       root:
-        description: OpenTofu composition root to change
+        description: root-trust may be planned/applied; recovery-plane is plan-only in this workflow
         required: true
         type: choice
         options:
           - root-trust
           - recovery-plane
       source_sha:
-        description: Full protected-main commit SHA approved for application
+        description: Full current protected-main commit SHA to plan or apply
         required: true
         type: string
       plan_run_id:
@@ -50,7 +52,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  GH_API_VERSION: "2026-03-10"
+  REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
   GO_VERSION: "1.26.7"
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
   TOFU_VERSION: "1.12.6"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
@@ -67,6 +73,7 @@ jobs:
     timeout-minutes: 45
     environment: trusted-build
     permissions:
+      actions: read
       contents: read
       id-token: write
     env:
@@ -91,11 +98,88 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          [[ "${EXPECTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_RUN_ATTEMPT}" = "1"
+          if ! test "${REPOSITORY_VISIBILITY}" = "private"; then
+            echo "::error::Unencrypted Ring-0 saved plans must not be stored as artifacts in a public or internal repository. This workflow remains fail-closed until execution moves to a qualified private executor repository or artifact encryption is implemented."
+            exit 1
+          fi
           test "${GITHUB_REF}" = "refs/heads/main"
           test "${GITHUB_SHA}" = "${EXPECTED_SOURCE_SHA}"
-          test "${#EXPECTED_SOURCE_SHA}" -eq 40
-          [[ "${EXPECTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          repository_json="${RUNNER_TEMP}/plan-repository.json"
+          branch_json="${RUNNER_TEMP}/plan-main-branch.json"
+          checks_json="${RUNNER_TEMP}/plan-source-checks.json"
+          source_run_json="${RUNNER_TEMP}/plan-source-workflow-run.json"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}" >"${repository_json}"
+          jq -e \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            '(.full_name == $repository) and (.visibility == "private")' \
+            "${repository_json}" >/dev/null
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/branches/main" >"${branch_json}"
+          if ! jq -e \
+              --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+              '(.name == "main")
+                and (.protected == true)
+                and (.commit.sha == $sourceSha)' \
+              "${branch_json}" >/dev/null; then
+            echo "::error::Plan requires the exact current SHA of an actually protected main branch."
+            exit 1
+          fi
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${EXPECTED_SOURCE_SHA}"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_SOURCE_SHA}/check-runs?per_page=100" \
+            >"${checks_json}"
+          mapfile -t candidate_run_ids < <(
+            jq -r '
+              .check_runs[]
+              | select(
+                  .name == "required"
+                  and .app.slug == "github-actions"
+                  and .status == "completed"
+                  and .conclusion == "success"
+                )
+              | .details_url
+              | strings
+              | capture("/actions/runs/(?<run>[1-9][0-9]*)/job/[1-9][0-9]*$").run
+            ' "${checks_json}" | LC_ALL=C sort -u
+          )
+          qualified_source=false
+          for candidate_run_id in "${candidate_run_ids[@]}"; do
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate_run_id}" \
+              >"${source_run_json}"
+            if jq -e \
+                --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+                --arg repository "${GITHUB_REPOSITORY}" \
+                '(.head_sha == $sourceSha)
+                  and (.head_branch == "main")
+                  and (.event == "push")
+                  and (.status == "completed")
+                  and (.conclusion == "success")
+                  and (.repository.full_name == $repository)
+                  and ((.path | split("@")[0]) == ".github/workflows/pull-request.yml")' \
+                "${source_run_json}" >/dev/null; then
+              qualified_source=true
+              break
+            fi
+          done
+          if ! "${qualified_source}"; then
+            echo "::error::The exact source SHA must have a successful pull-request / required check."
+            exit 1
+          fi
 
       - name: Select the exact backend for the requested root
         shell: bash
@@ -111,6 +195,7 @@ jobs:
               selected_prefix="recovery-plane"
               ;;
             *)
+              echo "::error::Unsupported bootstrap root."
               exit 1
               ;;
           esac
@@ -130,6 +215,7 @@ jobs:
           test -n "${WIF_PROVIDER}"
           test -n "${WIF_SERVICE_ACCOUNT}"
           test -n "${WIF_AUDIENCE}"
+          test "${WIF_AUDIENCE}" = "sts.googleapis.com"
           test -n "${BOOTSTRAP_VALUES_JSON}"
           jq -e '
             type == "object"
@@ -144,8 +230,11 @@ jobs:
               ;;
             recovery-plane)
               test -n "${ROOT_TRUST_BACKEND_BUCKET}"
+              test -z "${TF_VAR_workforce_oidc_client_secret}"
+              test -z "${TF_VAR_workforce_oidc_client_secret_version}"
               ;;
             *)
+              echo "::error::Unsupported bootstrap root."
               exit 1
               ;;
           esac
@@ -165,8 +254,49 @@ jobs:
           checksums: |
             5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8
 
+      - name: Prepare the exact reviewed Google provider package
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          provider_probe="${RUNNER_TEMP}/provider-probe"
+          provider_mirror="${RUNNER_TEMP}/provider-mirror"
+          provider_config="${RUNNER_TEMP}/provider-installation.tfrc"
+          test ! -e "${provider_probe}"
+          test ! -e "${provider_mirror}"
+          mkdir -m 0700 "${provider_probe}" "${provider_mirror}"
+          printf '%s\n' \
+            'terraform {' \
+            '  required_providers {' \
+            '    google = {' \
+            '      source  = "hashicorp/google"' \
+            '      version = "7.42.0"' \
+            '    }' \
+            '  }' \
+            '}' >"${provider_probe}/versions.tf"
+          tofu -chdir="${provider_probe}" providers mirror \
+            -platform=linux_amd64 \
+            "${provider_mirror}"
+          provider_package="${provider_mirror}/registry.opentofu.org/hashicorp/google/terraform-provider-google_7.42.0_linux_amd64.zip"
+          test -f "${provider_package}"
+          test ! -L "${provider_package}"
+          test "$(sha256sum "${provider_package}" | cut -d ' ' -f1)" \
+            = "5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
+          printf 'provider_installation {\n  filesystem_mirror {\n    path    = "%s"\n    include = ["hashicorp/google"]\n  }\n}\n' \
+            "${provider_mirror}" >"${provider_config}"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "${provider_config}" >>"${GITHUB_ENV}"
+
+      - name: Build the policy and evidence verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          go -C tooling mod verify
+          go -C tooling build -trimpath -buildvcs=false \
+            -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
+          "${RUNNER_TEMP}/bootstrapctl" validate --root .
+
       - name: Authenticate the plan identity with workload federation
-        id: plan-auth
+        id: plan_auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
@@ -174,11 +304,13 @@ jobs:
           audience: ${{ env.WIF_AUDIENCE }}
           create_credentials_file: true
           export_environment_variables: true
+          cleanup_credentials: false
+          request_reason: bootstrap-plan/${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/${{ inputs.source_sha }}
 
       - name: Move the generated plan credentials outside the source tree
         shell: bash
         env:
-          GENERATED_CREDENTIALS_FILE: ${{ steps.plan-auth.outputs.credentials_file_path }}
+          GENERATED_CREDENTIALS_FILE: ${{ steps.plan_auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
           test -n "${GENERATED_CREDENTIALS_FILE}"
@@ -196,40 +328,6 @@ jobs:
             GOOGLE_GHA_CREDS_PATH "${destination}" \
             >>"${GITHUB_ENV}"
 
-      - name: Prepare the exact reviewed Google provider package
-        shell: bash
-        run: |
-          set -euo pipefail
-          provider_probe="${RUNNER_TEMP}/provider-probe"
-          provider_mirror="${RUNNER_TEMP}/provider-mirror"
-          provider_config="${RUNNER_TEMP}/provider-installation.tfrc"
-          mkdir -m 0700 "${provider_probe}" "${provider_mirror}"
-          printf '%s\n' \
-            'terraform {' \
-            '  required_providers {' \
-            '    google = {' \
-            '      source  = "hashicorp/google"' \
-            '      version = "7.42.0"' \
-            '    }' \
-            '  }' \
-            '}' >"${provider_probe}/versions.tf"
-          tofu -chdir="${provider_probe}" providers mirror \
-            -platform=linux_amd64 \
-            "${provider_mirror}"
-          provider_package="${provider_mirror}/registry.opentofu.org/hashicorp/google/terraform-provider-google_7.42.0_linux_amd64.zip"
-          test "$(sha256sum "${provider_package}" | cut -d ' ' -f1)" \
-            = "5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
-          printf 'provider_installation {\n  filesystem_mirror {\n    path    = "%s"\n    include = ["hashicorp/google"]\n  }\n  direct {\n    exclude = ["hashicorp/google"]\n  }\n}\n' \
-            "${provider_mirror}" >"${provider_config}"
-          printf 'TF_CLI_CONFIG_FILE=%s\n' "${provider_config}" >>"${GITHUB_ENV}"
-
-      - name: Build the policy and evidence verifier
-        shell: bash
-        run: |
-          set -euo pipefail
-          go -C tooling build -trimpath -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
-          "${RUNNER_TEMP}/bootstrapctl" validate --root .
-
       - name: Create the reviewed plan
         shell: bash
         env:
@@ -240,6 +338,9 @@ jobs:
           umask 077
           values_path="${RUNNER_TEMP}/bootstrap-values.json"
           variables_path="${RUNNER_TEMP}/resolved.auto.tfvars.json"
+          target_data="${RUNNER_TEMP}/target-tofu-data"
+          test ! -e "${target_data}"
+          mkdir -m 0700 "${target_data}"
           printf '%s' "${BOOTSTRAP_VALUES_JSON}" >"${values_path}"
           chmod 0600 "${values_path}"
 
@@ -341,7 +442,7 @@ jobs:
               ;;
           esac
 
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" init \
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" init \
               -input=false \
               -backend-config="bucket=${BACKEND_BUCKET}" \
               -backend-config="prefix=${BACKEND_PREFIX}" \
@@ -351,8 +452,8 @@ jobs:
           fi
           provider_lock="opentofu/live/${BOOTSTRAP_ROOT}/.terraform.lock.hcl"
           grep -Fq 'version     = "7.42.0"' "${provider_lock}"
-          test "$(tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" workspace show)" = "default"
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" plan \
+          test "$(TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" workspace show)" = "default"
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" plan \
               -input=false \
               -lock-timeout=5m \
               -var-file="${variables_path}" \
@@ -365,7 +466,7 @@ jobs:
             --root "${BOOTSTRAP_ROOT}" \
             --opentofu-root opentofu \
             --saved-plan "${RUNNER_TEMP}/tfplan"
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" show \
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" show \
               -json "${RUNNER_TEMP}/tfplan" \
               >"${RUNNER_TEMP}/tfplan.json" 2>"${RUNNER_TEMP}/tofu-show.log"; then
             echo "::error::OpenTofu plan rendering failed; raw output is withheld."
@@ -378,22 +479,35 @@ jobs:
           import sys
 
           path = Path(sys.argv[1])
-          raw = path.read_bytes()
-          secret = os.environ.get("TF_VAR_workforce_oidc_client_secret", "").encode()
-          if secret and secret in raw:
+          document = json.loads(path.read_text(encoding="utf-8"))
+          secret = os.environ.get("TF_VAR_workforce_oidc_client_secret", "")
+
+          def contains_secret(value):
+              if isinstance(value, str):
+                  return secret in value
+              if isinstance(value, dict):
+                  return any(contains_secret(child) for child in value.values())
+              if isinstance(value, list):
+                  return any(contains_secret(child) for child in value)
+              return False
+
+          if secret and contains_secret(document):
               raise SystemExit("plan JSON contains forbidden concrete secret material")
 
-          document = json.loads(raw)
+          forbidden_write_only_keys = {
+              "plain_text_wo",
+              "client_secret",
+              "workforce_oidc_client_secret",
+          }
 
           def contains_concrete_write_only(value):
               if isinstance(value, dict):
                   for key, child in value.items():
-                      normalized = key.lower()
-                      if normalized in {
-                          "plain_text_wo",
-                          "client_secret",
-                          "workforce_oidc_client_secret",
-                      } and isinstance(child, (str, int, float, bool)) and child not in ("",):
+                      if (
+                          key.lower() in forbidden_write_only_keys
+                          and not isinstance(child, (dict, list))
+                          and child not in (None, "")
+                      ):
                           return True
                       if contains_concrete_write_only(child):
                           return True
@@ -401,7 +515,34 @@ jobs:
                   return any(contains_concrete_write_only(child) for child in value)
               return False
 
-          if contains_concrete_write_only(document):
+          def value_bearing_roots(document):
+              roots = []
+              for key in ("planned_values", "prior_state"):
+                  value = document.get(key)
+                  if isinstance(value, (dict, list)):
+                      roots.append(value)
+              for change in document.get("resource_changes", []):
+                  if not isinstance(change, dict):
+                      continue
+                  values = change.get("change")
+                  if not isinstance(values, dict):
+                      continue
+                  for key in ("before", "after"):
+                      value = values.get(key)
+                      if isinstance(value, (dict, list)):
+                          roots.append(value)
+              output_changes = document.get("output_changes", {})
+              if isinstance(output_changes, dict):
+                  for values in output_changes.values():
+                      if not isinstance(values, dict):
+                          continue
+                      for key in ("before", "after"):
+                          value = values.get(key)
+                          if isinstance(value, (dict, list)):
+                              roots.append(value)
+              return roots
+
+          if any(contains_concrete_write_only(root) for root in value_bearing_roots(document)):
               raise SystemExit("plan JSON contains a concrete write-only value")
           PY
           "${RUNNER_TEMP}/bootstrapctl" plan-check \
@@ -476,7 +617,22 @@ jobs:
             sha256sum tfplan tfplan.json evidence.json provenance.json >SHA256SUMS
           )
 
+      - name: Remove plan credentials before artifact publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          moved_credentials="${RUNNER_TEMP}/plan-google-credentials.json"
+          test -f "${moved_credentials}"
+          test ! -L "${moved_credentials}"
+          rm -f -- "${moved_credentials}"
+          printf '%s=%s\n' \
+            GOOGLE_APPLICATION_CREDENTIALS "" \
+            CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE "" \
+            GOOGLE_GHA_CREDS_PATH "" \
+            >>"${GITHUB_ENV}"
+
       - name: Upload the one-day immutable plan bundle
+        id: upload_plan
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bootstrap-plan
@@ -484,18 +640,80 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+          include-hidden-files: false
+          overwrite: false
 
       - name: Publish the exact review coordinates
         shell: bash
+        env:
+          PLAN_ARTIFACT_ID: ${{ steps.upload_plan.outputs['artifact-id'] }}
+          PLAN_ARTIFACT_DIGEST: ${{ steps.upload_plan.outputs['artifact-digest'] }}
         run: |
           set -euo pipefail
+          [[ "${PLAN_ARTIFACT_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${PLAN_ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
           saved_plan_sha256="$(jq -er '.savedPlanSha256' "${RUNNER_TEMP}/plan-bundle/provenance.json")"
           {
             printf "Plan run ID: \`%s\`\n\n" "${GITHUB_RUN_ID}"
+            printf "Plan run attempt: \`%s\`\n\n" "${GITHUB_RUN_ATTEMPT}"
+            printf "Artifact ID: \`%s\`\n\n" "${PLAN_ARTIFACT_ID}"
+            printf "Artifact archive digest: \`sha256:%s\`\n\n" "${PLAN_ARTIFACT_DIGEST}"
             printf "Source SHA: \`%s\`\n\n" "${GITHUB_SHA}"
             printf "Root: \`%s\`\n\n" "${BOOTSTRAP_ROOT}"
             printf "Saved-plan SHA-256: \`%s\`\n" "${saved_plan_sha256}"
           } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove plan credentials and generated runtime files
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GENERATED_CREDENTIALS_FILE: ${{ steps.plan_auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          moved_credentials="${RUNNER_TEMP}/plan-google-credentials.json"
+          if test -e "${moved_credentials}"; then
+            test -f "${moved_credentials}"
+            test ! -L "${moved_credentials}"
+            rm -f -- "${moved_credentials}"
+          fi
+          if test -n "${GENERATED_CREDENTIALS_FILE}" && test -e "${GENERATED_CREDENTIALS_FILE}"; then
+            test "$(dirname -- "${GENERATED_CREDENTIALS_FILE}")" = "${GITHUB_WORKSPACE}"
+            [[ "$(basename -- "${GENERATED_CREDENTIALS_FILE}")" =~ ^gha-creds-[A-Za-z0-9_-]+\.json$ ]]
+            test -f "${GENERATED_CREDENTIALS_FILE}"
+            test ! -L "${GENERATED_CREDENTIALS_FILE}"
+            rm -f -- "${GENERATED_CREDENTIALS_FILE}"
+          fi
+          rm -f -- \
+            opentofu/live/root-trust/.terraform.lock.hcl \
+            opentofu/live/recovery-plane/.terraform.lock.hcl \
+            "${RUNNER_TEMP}/bootstrapctl" \
+            "${RUNNER_TEMP}/provider-installation.tfrc" \
+            "${RUNNER_TEMP}/plan-repository.json" \
+            "${RUNNER_TEMP}/plan-main-branch.json" \
+            "${RUNNER_TEMP}/plan-source-checks.json" \
+            "${RUNNER_TEMP}/plan-source-workflow-run.json" \
+            "${RUNNER_TEMP}/bootstrap-values.json" \
+            "${RUNNER_TEMP}/resolved.auto.tfvars.json" \
+            "${RUNNER_TEMP}/root-federation.json" \
+            "${RUNNER_TEMP}/root-signing.json" \
+            "${RUNNER_TEMP}/root-state-backends.json" \
+            "${RUNNER_TEMP}/recovery-context.json" \
+            "${RUNNER_TEMP}/render-result.json" \
+            "${RUNNER_TEMP}/tfplan" \
+            "${RUNNER_TEMP}/tfplan.json" \
+            "${RUNNER_TEMP}/root-context-init.log" \
+            "${RUNNER_TEMP}/root-federation.log" \
+            "${RUNNER_TEMP}/root-signing.log" \
+            "${RUNNER_TEMP}/root-state-backends.log" \
+            "${RUNNER_TEMP}/tofu-init.log" \
+            "${RUNNER_TEMP}/tofu-plan.log" \
+            "${RUNNER_TEMP}/tofu-show.log"
+          rm -rf -- \
+            "${RUNNER_TEMP}/plan-bundle" \
+            "${RUNNER_TEMP}/provider-probe" \
+            "${RUNNER_TEMP}/provider-mirror" \
+            "${RUNNER_TEMP}/target-tofu-data" \
+            "${RUNNER_TEMP}/root-context-data"
 
   apply:
     name: apply
@@ -541,10 +759,11 @@ jobs:
               selected_prefix="root-trust"
               ;;
             recovery-plane)
-              selected_bucket="${RECOVERY_BACKEND_BUCKET}"
-              selected_prefix="recovery-plane"
+              echo "::error::Routine protected apply is intentionally limited to root-trust; recovery-plane is plan-only in this workflow and requires the cold ceremony."
+              exit 1
               ;;
             *)
+              echo "::error::Unsupported bootstrap root."
               exit 1
               ;;
           esac
@@ -561,15 +780,46 @@ jobs:
           TF_VAR_workforce_oidc_client_secret_version: ${{ inputs.root == 'root-trust' && vars.WORKFORCE_OIDC_CLIENT_SECRET_VERSION || '' }}
         run: |
           set -euo pipefail
+          [[ "${EXPECTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_RUN_ATTEMPT}" = "1"
+          if ! test "${REPOSITORY_VISIBILITY}" = "private"; then
+            echo "::error::Unencrypted Ring-0 saved plans must not be stored as artifacts in a public or internal repository. This workflow remains fail-closed until execution moves to a qualified private executor repository or artifact encryption is implemented."
+            exit 1
+          fi
           test "${GITHUB_REF}" = "refs/heads/main"
           test "${GITHUB_SHA}" = "${EXPECTED_SOURCE_SHA}"
-          [[ "${EXPECTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          repository_json="${RUNNER_TEMP}/apply-repository.json"
+          branch_json="${RUNNER_TEMP}/apply-main-branch.json"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}" >"${repository_json}"
+          jq -e \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            '(.full_name == $repository) and (.visibility == "private")' \
+            "${repository_json}" >/dev/null
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/branches/main" >"${branch_json}"
+          if ! jq -e \
+              --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+              '(.name == "main")
+                and (.protected == true)
+                and (.commit.sha == $sourceSha)' \
+              "${branch_json}" >/dev/null; then
+            echo "::error::Apply requires the exact current SHA of an actually protected main branch."
+            exit 1
+          fi
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${EXPECTED_SOURCE_SHA}"
           test -n "${BACKEND_BUCKET}"
           test -n "${WIF_PROVIDER}"
           test -n "${WIF_SERVICE_ACCOUNT}"
           test -n "${WIF_AUDIENCE}"
+          test "${WIF_AUDIENCE}" = "sts.googleapis.com"
           test "${BOOTSTRAP_ROOT}" = "root-trust"
           test -n "${TF_VAR_workforce_oidc_client_secret}"
           test "${#TF_VAR_workforce_oidc_client_secret}" -ge 32
@@ -594,48 +844,129 @@ jobs:
           checksums: |
             5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8
 
-      - name: Verify the referenced plan workflow run
+      - name: Verify the referenced plan workflow run and artifact
+        id: plan_artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          workflow_json="${RUNNER_TEMP}/protected-apply-workflow.json"
           run_json="${RUNNER_TEMP}/plan-run.json"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" >"${run_json}"
+          artifacts_json="${RUNNER_TEMP}/plan-artifacts.json"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/protected-apply.yml" >"${workflow_json}"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" >"${run_json}"
+          workflow_id="$(jq -er '.id | numbers | select(. > 0)' "${workflow_json}")"
+          run_attempt="$(jq -er '.run_attempt | numbers | select(. > 0)' "${run_json}")"
           jq -e \
             --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
-            '(.event == "workflow_dispatch")
+            --arg runId "${PLAN_RUN_ID}" \
+            --argjson workflowId "${workflow_id}" \
+            '(.id == ($runId | tonumber))
+              and (.workflow_id == $workflowId)
+              and (.event == "workflow_dispatch")
+              and (.run_attempt == 1)
               and (.head_sha == $sourceSha)
               and (.head_branch == "main")
               and (.status == "completed")
               and (.conclusion == "success")
-              and (.path == ".github/workflows/protected-apply.yml")' \
+              and ((.path | split("@")[0]) == ".github/workflows/protected-apply.yml")' \
             "${run_json}" >/dev/null
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}/artifacts?name=bootstrap-plan&per_page=100" \
+            >"${artifacts_json}"
+          jq -e \
+            --arg runId "${PLAN_RUN_ID}" \
+            --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+            '(.total_count == 1)
+              and ((.artifacts | length) == 1)
+              and (.artifacts[0].name == "bootstrap-plan")
+              and (.artifacts[0].expired == false)
+              and (.artifacts[0].size_in_bytes > 0)
+              and (.artifacts[0].size_in_bytes <= 356515840)
+              and (.artifacts[0].workflow_run.id == ($runId | tonumber))
+              and (.artifacts[0].workflow_run.head_sha == $sourceSha)
+              and (.artifacts[0].digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))' \
+            "${artifacts_json}" >/dev/null
+          artifact_id="$(jq -er '.artifacts[0].id | numbers | select(. > 0)' "${artifacts_json}")"
+          artifact_digest="$(jq -er '.artifacts[0].digest' "${artifacts_json}")"
+          printf 'artifact_id=%s\nartifact_digest=%s\nrun_attempt=%s\nworkflow_id=%s\n' \
+            "${artifact_id}" "${artifact_digest}" "${run_attempt}" "${workflow_id}" \
+            >>"${GITHUB_OUTPUT}"
 
       - name: Download the separately reviewed plan bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bootstrap-plan
+          artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}
           path: ${{ runner.temp }}/plan-bundle
+          merge-multiple: true
+          digest-mismatch: error
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.plan_run_id }}
 
+      - name: Build the policy and evidence verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          go -C tooling mod verify
+          go -C tooling build -trimpath -buildvcs=false \
+            -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
+          "${RUNNER_TEMP}/bootstrapctl" validate --root .
+
       - name: Verify bundle integrity, provenance, and freshness
         shell: bash
         env:
+          PLAN_RUN_ATTEMPT: ${{ steps.plan_artifact.outputs.run_attempt }}
+          PLAN_ARTIFACT_DIGEST: ${{ steps.plan_artifact.outputs.artifact_digest }}
           TF_VAR_workforce_oidc_client_secret: ${{ inputs.root == 'root-trust' && secrets.WORKFORCE_OIDC_CLIENT_SECRET || '' }}
           TF_VAR_workforce_oidc_client_secret_version: ${{ inputs.root == 'root-trust' && vars.WORKFORCE_OIDC_CLIENT_SECRET_VERSION || '' }}
         run: |
           set -euo pipefail
           bundle="${RUNNER_TEMP}/plan-bundle"
-          expected="SHA256SUMS evidence.json provenance.json tfplan tfplan.json"
-          actual="$(find "${bundle}" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort | paste -sd ' ' -)"
-          test "${actual}" = "${expected}"
+          expected=$'SHA256SUMS\tf\nevidence.json\tf\nprovenance.json\tf\ntfplan\tf\ntfplan.json\tf'
+          actual="$(find "${bundle}" -mindepth 1 -maxdepth 1 -printf '%f\t%y\n' | LC_ALL=C sort)"
+          if test "${actual}" != "${expected}"; then
+            echo "::error::The plan bundle must contain exactly five top-level regular files."
+            exit 1
+          fi
+          for name in SHA256SUMS evidence.json provenance.json tfplan tfplan.json; do
+            path="${bundle}/${name}"
+            if ! test -f "${path}" || test -L "${path}"; then
+              echo "::error::Each bundle entry must be a bounded regular file: ${name}"
+              exit 1
+            fi
+            size="$(stat -c '%s' "${path}")"
+            case "${name}" in
+              SHA256SUMS) maximum=4096 ;;
+              evidence.json|provenance.json) maximum=$((2 * 1024 * 1024)) ;;
+              tfplan.json) maximum=$((64 * 1024 * 1024)) ;;
+              tfplan) maximum=$((256 * 1024 * 1024)) ;;
+            esac
+            if test "${size}" -le 0 || test "${size}" -gt "${maximum}"; then
+              echo "::error::Each bundle entry must be a bounded regular file: ${name}"
+              exit 1
+            fi
+          done
+          expected_checksum_names="evidence.json provenance.json tfplan tfplan.json"
+          checksum_names="$(awk 'NF == 2 {print $2}' "${bundle}/SHA256SUMS" | LC_ALL=C sort | paste -sd ' ' -)"
+          test "$(wc -l <"${bundle}/SHA256SUMS")" -eq 4
+          test "${checksum_names}" = "${expected_checksum_names}"
+          test "$(awk 'length($1) != 64 || $1 !~ /^[0-9a-f]+$/ {bad=1} END {print bad+0}' "${bundle}/SHA256SUMS")" -eq 0
           (
             cd "${bundle}"
             sha256sum --check --strict SHA256SUMS
           )
+          [[ "${PLAN_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${PLAN_ARTIFACT_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           backend_configuration_sha256="$(
             printf '%s\0%s' "${BACKEND_BUCKET}" "${BACKEND_PREFIX}" \
               | sha256sum \
@@ -645,23 +976,19 @@ jobs:
             sha256sum "${bundle}/tfplan" \
               | cut -d ' ' -f1
           )"
-          if test "${BOOTSTRAP_ROOT}" = "root-trust"; then
-            client_secret_binding_sha256="$(
-              printf '%s\0%s' \
-                "${TF_VAR_workforce_oidc_client_secret}" \
-                "${TF_VAR_workforce_oidc_client_secret_version}" \
-                | sha256sum \
-                | cut -d ' ' -f1
-            )"
-            client_secret_version="${TF_VAR_workforce_oidc_client_secret_version}"
-          else
-            client_secret_binding_sha256="$(printf '%s' 'not-applicable' | sha256sum | cut -d ' ' -f1)"
-            client_secret_version=0
-          fi
+          client_secret_binding_sha256="$(
+            printf '%s\0%s' \
+              "${TF_VAR_workforce_oidc_client_secret}" \
+              "${TF_VAR_workforce_oidc_client_secret_version}" \
+              | sha256sum \
+              | cut -d ' ' -f1
+          )"
+          client_secret_version="${TF_VAR_workforce_oidc_client_secret_version}"
           jq -e \
             --arg root "${BOOTSTRAP_ROOT}" \
             --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
             --arg runId "${PLAN_RUN_ID}" \
+            --arg runAttempt "${PLAN_RUN_ATTEMPT}" \
             --arg artifact "bootstrap-plan" \
             --arg backendConfigurationSha256 "${backend_configuration_sha256}" \
             --arg savedPlanSha256 "${saved_plan_sha256}" \
@@ -671,7 +998,7 @@ jobs:
               and (.root == $root)
               and (.sourceSha == $sourceSha)
               and (.runId == $runId)
-              and (.runAttempt | type == "string" and test("^[1-9][0-9]*$"))
+              and (.runAttempt == $runAttempt)
               and (.artifact == $artifact)
               and (.backendConfigurationSha256 == $backendConfigurationSha256)
               and (.resolvedVariablesSha256 | type == "string" and test("^[0-9a-f]{64}$"))
@@ -685,8 +1012,39 @@ jobs:
           now_epoch="$(date -u +%s)"
           test "${expires_epoch}" -eq "$((created_epoch + 21600))"
           test "${now_epoch}" -ge "${created_epoch}"
-          test "${now_epoch}" -le "${expires_epoch}"
-          go -C tooling build -trimpath -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
+          test "${now_epoch}" -lt "${expires_epoch}"
+
+      - name: Prepare the exact reviewed Google provider package
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          provider_probe="${RUNNER_TEMP}/provider-probe"
+          provider_mirror="${RUNNER_TEMP}/provider-mirror"
+          provider_config="${RUNNER_TEMP}/provider-installation.tfrc"
+          test ! -e "${provider_probe}"
+          test ! -e "${provider_mirror}"
+          mkdir -m 0700 "${provider_probe}" "${provider_mirror}"
+          printf '%s\n' \
+            'terraform {' \
+            '  required_providers {' \
+            '    google = {' \
+            '      source  = "hashicorp/google"' \
+            '      version = "7.42.0"' \
+            '    }' \
+            '  }' \
+            '}' >"${provider_probe}/versions.tf"
+          tofu -chdir="${provider_probe}" providers mirror \
+            -platform=linux_amd64 \
+            "${provider_mirror}"
+          provider_package="${provider_mirror}/registry.opentofu.org/hashicorp/google/terraform-provider-google_7.42.0_linux_amd64.zip"
+          test -f "${provider_package}"
+          test ! -L "${provider_package}"
+          test "$(sha256sum "${provider_package}" | cut -d ' ' -f1)" \
+            = "5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
+          printf 'provider_installation {\n  filesystem_mirror {\n    path    = "%s"\n    include = ["hashicorp/google"]\n  }\n}\n' \
+            "${provider_mirror}" >"${provider_config}"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "${provider_config}" >>"${GITHUB_ENV}"
 
       - name: Verify the expiry-bound two-person plan approval
         shell: bash
@@ -726,7 +1084,7 @@ jobs:
             >"${approval_dir}/verification.json"
 
       - name: Authenticate the distinct apply identity with workload federation
-        id: apply-auth
+        id: apply_auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
@@ -734,11 +1092,13 @@ jobs:
           audience: ${{ env.WIF_AUDIENCE }}
           create_credentials_file: true
           export_environment_variables: true
+          cleanup_credentials: false
+          request_reason: bootstrap-apply/${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/${{ inputs.source_sha }}
 
       - name: Move the generated apply credentials outside the source tree
         shell: bash
         env:
-          GENERATED_CREDENTIALS_FILE: ${{ steps.apply-auth.outputs.credentials_file_path }}
+          GENERATED_CREDENTIALS_FILE: ${{ steps.apply_auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
           test -n "${GENERATED_CREDENTIALS_FILE}"
@@ -756,33 +1116,6 @@ jobs:
             GOOGLE_GHA_CREDS_PATH "${destination}" \
             >>"${GITHUB_ENV}"
 
-      - name: Prepare the exact reviewed Google provider package
-        shell: bash
-        run: |
-          set -euo pipefail
-          provider_probe="${RUNNER_TEMP}/provider-probe"
-          provider_mirror="${RUNNER_TEMP}/provider-mirror"
-          provider_config="${RUNNER_TEMP}/provider-installation.tfrc"
-          mkdir -m 0700 "${provider_probe}" "${provider_mirror}"
-          printf '%s\n' \
-            'terraform {' \
-            '  required_providers {' \
-            '    google = {' \
-            '      source  = "hashicorp/google"' \
-            '      version = "7.42.0"' \
-            '    }' \
-            '  }' \
-            '}' >"${provider_probe}/versions.tf"
-          tofu -chdir="${provider_probe}" providers mirror \
-            -platform=linux_amd64 \
-            "${provider_mirror}"
-          provider_package="${provider_mirror}/registry.opentofu.org/hashicorp/google/terraform-provider-google_7.42.0_linux_amd64.zip"
-          test "$(sha256sum "${provider_package}" | cut -d ' ' -f1)" \
-            = "5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
-          printf 'provider_installation {\n  filesystem_mirror {\n    path    = "%s"\n    include = ["hashicorp/google"]\n  }\n  direct {\n    exclude = ["hashicorp/google"]\n  }\n}\n' \
-            "${provider_mirror}" >"${provider_config}"
-          printf 'TF_CLI_CONFIG_FILE=%s\n' "${provider_config}" >>"${GITHUB_ENV}"
-
       - name: Apply only the verified saved plan
         shell: bash
         env:
@@ -793,7 +1126,11 @@ jobs:
           set -euo pipefail
           umask 077
           bundle="${RUNNER_TEMP}/plan-bundle"
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" init \
+          approval_dir="${RUNNER_TEMP}/approval"
+          target_data="${RUNNER_TEMP}/target-tofu-data"
+          test ! -e "${target_data}"
+          mkdir -m 0700 "${target_data}"
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" init \
               -input=false \
               -backend-config="bucket=${BACKEND_BUCKET}" \
               -backend-config="prefix=${BACKEND_PREFIX}" \
@@ -803,13 +1140,13 @@ jobs:
           fi
           provider_lock="opentofu/live/${BOOTSTRAP_ROOT}/.terraform.lock.hcl"
           grep -Fq 'version     = "7.42.0"' "${provider_lock}"
-          test "$(tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" workspace show)" = "default"
+          test "$(TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" workspace show)" = "default"
           "${RUNNER_TEMP}/bootstrapctl" plan-source-check \
             --root "${BOOTSTRAP_ROOT}" \
             --opentofu-root opentofu \
             --saved-plan "${bundle}/tfplan"
           rerendered_plan="${RUNNER_TEMP}/rerendered-tfplan.json"
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" show \
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" show \
               -json "${bundle}/tfplan" \
               >"${rerendered_plan}" \
               2>"${RUNNER_TEMP}/tofu-show.log"; then
@@ -835,8 +1172,38 @@ jobs:
             --plan "${rerendered_plan}" \
             --evidence "${bundle}/evidence.json"
           test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          final_branch_json="${RUNNER_TEMP}/final-main-branch.json"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/branches/main" >"${final_branch_json}"
+          if ! jq -e \
+              --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+              '(.name == "main")
+                and (.protected == true)
+                and (.commit.sha == $sourceSha)' \
+              "${final_branch_json}" >/dev/null; then
+            echo "::error::Protected main changed or lost protection after approval; refusing apply."
+            exit 1
+          fi
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${EXPECTED_SOURCE_SHA}"
-          if ! tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" apply \
+          test "$(sha256sum "${bundle}/tfplan" | cut -d ' ' -f1)" = "${REVIEWED_PLAN_SHA256}"
+          "${RUNNER_TEMP}/bootstrapctl" approval verify \
+            --receipt "${approval_dir}/receipt.json" \
+            --public-key-1 "${approval_dir}/public-key-1.pem" \
+            --public-key-2 "${approval_dir}/public-key-2.pem" \
+            --signature-1 "${approval_dir}/signature-1.bin" \
+            --signature-2 "${approval_dir}/signature-2.bin" \
+            --operation apply \
+            --source-sha "${EXPECTED_SOURCE_SHA}" \
+            --root "${BOOTSTRAP_ROOT}" \
+            --subject-kind opentofu-saved-plan \
+            --subject-sha256 "${REVIEWED_PLAN_SHA256}" \
+            --plan-run-id "${PLAN_RUN_ID}" \
+            >"${approval_dir}/terminal-verification.json"
+          if ! TF_DATA_DIR="${target_data}" tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" apply \
               -input=false \
               -lock-timeout=5m \
               "${bundle}/tfplan" \
@@ -844,4 +1211,53 @@ jobs:
             echo "::error::OpenTofu apply failed; raw output is withheld because it can contain sensitive values."
             exit 1
           fi
+          {
+            printf "Applied plan run ID: \`%s\`\n\n" "${PLAN_RUN_ID}"
+            printf "Applied source SHA: \`%s\`\n\n" "${EXPECTED_SOURCE_SHA}"
+            printf "Applied saved-plan SHA-256: \`%s\`\n" "${REVIEWED_PLAN_SHA256}"
+          } >>"${GITHUB_STEP_SUMMARY}"
           echo "Verified saved plan applied successfully."
+
+      - name: Remove apply credentials and generated runtime files
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GENERATED_CREDENTIALS_FILE: ${{ steps.apply_auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          moved_credentials="${RUNNER_TEMP}/apply-google-credentials.json"
+          if test -e "${moved_credentials}"; then
+            test -f "${moved_credentials}"
+            test ! -L "${moved_credentials}"
+            rm -f -- "${moved_credentials}"
+          fi
+          if test -n "${GENERATED_CREDENTIALS_FILE}" && test -e "${GENERATED_CREDENTIALS_FILE}"; then
+            test "$(dirname -- "${GENERATED_CREDENTIALS_FILE}")" = "${GITHUB_WORKSPACE}"
+            [[ "$(basename -- "${GENERATED_CREDENTIALS_FILE}")" =~ ^gha-creds-[A-Za-z0-9_-]+\.json$ ]]
+            test -f "${GENERATED_CREDENTIALS_FILE}"
+            test ! -L "${GENERATED_CREDENTIALS_FILE}"
+            rm -f -- "${GENERATED_CREDENTIALS_FILE}"
+          fi
+          rm -f -- \
+            opentofu/live/root-trust/.terraform.lock.hcl \
+            opentofu/live/recovery-plane/.terraform.lock.hcl \
+            "${RUNNER_TEMP}/bootstrapctl" \
+            "${RUNNER_TEMP}/provider-installation.tfrc" \
+            "${RUNNER_TEMP}/apply-repository.json" \
+            "${RUNNER_TEMP}/apply-main-branch.json" \
+            "${RUNNER_TEMP}/protected-apply-workflow.json" \
+            "${RUNNER_TEMP}/plan-run.json" \
+            "${RUNNER_TEMP}/plan-artifacts.json" \
+            "${RUNNER_TEMP}/final-main-branch.json" \
+            "${RUNNER_TEMP}/rerendered-tfplan.json" \
+            "${RUNNER_TEMP}/bundled-tfplan.canonical.json" \
+            "${RUNNER_TEMP}/rerendered-tfplan.canonical.json" \
+            "${RUNNER_TEMP}/tofu-init.log" \
+            "${RUNNER_TEMP}/tofu-show.log" \
+            "${RUNNER_TEMP}/tofu-apply.log"
+          rm -rf -- \
+            "${RUNNER_TEMP}/approval" \
+            "${RUNNER_TEMP}/plan-bundle" \
+            "${RUNNER_TEMP}/provider-probe" \
+            "${RUNNER_TEMP}/provider-mirror" \
+            "${RUNNER_TEMP}/target-tofu-data"
