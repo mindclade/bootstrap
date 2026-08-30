@@ -58,7 +58,7 @@
               "properties": {
                 "platform": {"const": "github"},
                 "projectRef": {"const": "identity-root"},
-                "activationEnabled": {"const": false},
+                "activationEnabled": {"type": "boolean"},
                 "poolId": {"const": "github-ci-evidence"},
                 "issuerUri": {"$ref": "#/$defs/envRef"},
                 "subjectClaim": {"const": "assertion.sub"},
@@ -107,7 +107,7 @@
               "properties": {
                 "platform": {"const": "github"},
                 "projectRef": {"const": "identity-root"},
-                "activationEnabled": {"const": false},
+                "activationEnabled": {"type": "boolean"},
                 "poolId": {"const": "github-config"},
                 "issuerUri": {"$ref": "#/$defs/envRef"},
                 "subjectClaim": {"const": "assertion.sub"},
@@ -367,7 +367,7 @@
       "additionalProperties": false,
       "required": ["activationEnabled", "subjectId", "providerId", "serviceAccountId", "workflowRef", "environment", "allowedAudience"],
       "properties": {
-        "activationEnabled": {"const": false},
+        "activationEnabled": {"type": "boolean"},
         "subjectId": {"const": "infrastructure-drift-plan"},
         "providerId": {"const": "infrastructure-plan"},
         "serviceAccountId": {"const": "infrastructure-plan"},
@@ -428,29 +428,54 @@
       "additionalProperties": false,
       "required": ["state", "activeSubjectIds", "gatedSubjectIds", "blockers"],
       "properties": {
-        "state": {"const": "blocked"},
+        "state": {"enum": ["BLOCKED", "FOUNDER_BOOTSTRAPPED", "CONNECTED_QUALIFIED"]},
+        "exceptionRef": {"const": "FBE-0001"},
         "activeSubjectIds": {
           "type": "array",
-          "minItems": 11,
-          "maxItems": 11,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
         },
         "gatedSubjectIds": {
           "type": "array",
-          "minItems": 5,
-          "maxItems": 5,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
         },
         "blockers": {
           "type": "array",
-          "minItems": 3,
-          "maxItems": 3,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": {"const": "BLOCKED"},
+            "activeSubjectIds": {"const": ["bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification", "infrastructure-live-development-plan", "infrastructure-live-development-apply", "infrastructure-live-staging-plan", "infrastructure-live-staging-apply", "infrastructure-live-production-plan", "infrastructure-live-production-apply", "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply"]},
+            "gatedSubjectIds": {"const": ["github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply", "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier"]},
+            "blockers": {"const": ["github-config-control-plane-federation-not-connected-qualified", "infrastructure-drift-federation-not-connected-qualified", "ci-evidence-federation-not-connected-qualified"]}
+          },
+          "not": {"required": ["exceptionRef"]}
+        },
+        {
+          "required": ["exceptionRef"],
+          "properties": {
+            "state": {"const": "FOUNDER_BOOTSTRAPPED"},
+            "exceptionRef": {"const": "FBE-0001"},
+            "activeSubjectIds": {"const": ["bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification", "infrastructure-live-development-plan", "infrastructure-live-development-apply", "infrastructure-live-staging-plan", "infrastructure-live-staging-apply", "infrastructure-live-production-plan", "infrastructure-live-production-apply", "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply", "github-config-protected-plan", "github-config-protected-apply"]},
+            "gatedSubjectIds": {"const": ["github-config-drift-plan", "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier"]},
+            "blockers": {"const": ["independent-review-not-connected-qualified", "production-authority-disabled"]}
+          }
+        },
+        {
+          "properties": {
+            "state": {"const": "CONNECTED_QUALIFIED"},
+            "activeSubjectIds": {"const": ["bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification", "infrastructure-live-development-plan", "infrastructure-live-development-apply", "infrastructure-live-staging-plan", "infrastructure-live-staging-apply", "infrastructure-live-production-plan", "infrastructure-live-production-apply", "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply", "github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply", "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier"]},
+            "gatedSubjectIds": {"const": []},
+            "blockers": {"const": []}
+          },
+          "not": {"required": ["exceptionRef"]}
+        }
+      ]
     }
   }
 }

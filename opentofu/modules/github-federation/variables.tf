@@ -192,7 +192,6 @@ variable "github_config" {
 
   validation {
     condition = (
-      var.github_config.activation_enabled == false &&
       var.github_config.pool_id == "github-config" &&
       var.github_config.issuer_uri == "https://token.actions.githubusercontent.com" &&
       var.github_config.repository_owner_id == "316676129" &&
@@ -206,7 +205,7 @@ variable "github_config" {
       var.github_config.identities.apply.provider_id == "github-config-apply" &&
       var.github_config.identities.apply.service_account_id == "github-config-apply"
     )
-    error_message = "GitHub-config identities must remain source-complete, disabled, and bound to the exact immutable repository and role-separated IDs."
+    error_message = "GitHub-config identities must remain source-complete and bound to the exact immutable repository and role-separated IDs."
   }
 
   validation {
@@ -242,7 +241,7 @@ variable "github_config" {
 }
 
 variable "ci_evidence" {
-  description = "Source-gated, dedicated GitHub trust boundary for immutable CI-evidence archival and recovery verification."
+  description = "Lifecycle-controlled, dedicated GitHub trust boundary for immutable CI-evidence archival and recovery verification."
   type = object({
     activation_enabled  = bool
     pool_id             = string
@@ -354,7 +353,6 @@ variable "infrastructure_live" {
 
   validation {
     condition = (
-      var.infrastructure_live.drift.activation_enabled == false &&
       var.infrastructure_live.drift.subject_id == "infrastructure-drift-plan" &&
       var.infrastructure_live.drift.provider_id == "infrastructure-plan" &&
       var.infrastructure_live.drift.service_account_id == "infrastructure-plan" &&
@@ -362,7 +360,7 @@ variable "infrastructure_live" {
       var.infrastructure_live.drift.environment == "trusted-build" &&
       var.infrastructure_live.drift.audience == "sts.googleapis.com"
     )
-    error_message = "Infrastructure drift identity must remain source-complete, disabled, and bound to its exact workflow, account, context, and audience."
+    error_message = "Infrastructure drift identity must remain source-complete and bound to its exact workflow, account, context, and audience."
   }
 
   validation {
@@ -379,5 +377,72 @@ variable "infrastructure_live" {
       identity.audience == "https://github.mindclade.io/oidc/infrastructure-live/${split("-", key)[0]}/${split("-", key)[1]}"
     ]) && length(distinct([for identity in values(var.infrastructure_live.identities) : identity.audience])) == 8
     error_message = "Infrastructure-live must expose exactly the eight unique environment/role providers, accounts, environments, and audiences."
+  }
+}
+
+variable "activation" {
+  description = "One-way federation lifecycle profile; only FBE-0001 authorizes founder-bootstrap activation before connected qualification."
+  type = object({
+    state              = string
+    exception_ref      = optional(string)
+    active_subject_ids = list(string)
+    gated_subject_ids  = list(string)
+    blockers           = list(string)
+  })
+
+  validation {
+    condition = (
+      var.activation.state == "BLOCKED" &&
+      var.activation.exception_ref == null &&
+      jsonencode(var.activation.active_subject_ids) == jsonencode([
+        "bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification",
+        "infrastructure-live-development-plan", "infrastructure-live-development-apply",
+        "infrastructure-live-staging-plan", "infrastructure-live-staging-apply",
+        "infrastructure-live-production-plan", "infrastructure-live-production-apply",
+        "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply",
+      ]) &&
+      jsonencode(var.activation.gated_subject_ids) == jsonencode([
+        "github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply",
+        "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier",
+      ]) &&
+      jsonencode(var.activation.blockers) == jsonencode([
+        "github-config-control-plane-federation-not-connected-qualified",
+        "infrastructure-drift-federation-not-connected-qualified",
+        "ci-evidence-federation-not-connected-qualified",
+      ])
+      ) || (
+      var.activation.state == "FOUNDER_BOOTSTRAPPED" &&
+      var.activation.exception_ref == "FBE-0001" &&
+      jsonencode(var.activation.active_subject_ids) == jsonencode([
+        "bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification",
+        "infrastructure-live-development-plan", "infrastructure-live-development-apply",
+        "infrastructure-live-staging-plan", "infrastructure-live-staging-apply",
+        "infrastructure-live-production-plan", "infrastructure-live-production-apply",
+        "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply",
+        "github-config-protected-plan", "github-config-protected-apply",
+      ]) &&
+      jsonencode(var.activation.gated_subject_ids) == jsonencode([
+        "github-config-drift-plan", "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier",
+      ]) &&
+      jsonencode(var.activation.blockers) == jsonencode([
+        "independent-review-not-connected-qualified",
+        "production-authority-disabled",
+      ])
+      ) || (
+      var.activation.state == "CONNECTED_QUALIFIED" &&
+      var.activation.exception_ref == null &&
+      jsonencode(var.activation.active_subject_ids) == jsonencode([
+        "bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification",
+        "infrastructure-live-development-plan", "infrastructure-live-development-apply",
+        "infrastructure-live-staging-plan", "infrastructure-live-staging-apply",
+        "infrastructure-live-production-plan", "infrastructure-live-production-apply",
+        "infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply",
+        "github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply",
+        "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier",
+      ]) &&
+      length(var.activation.gated_subject_ids) == 0 &&
+      length(var.activation.blockers) == 0
+    )
+    error_message = "Federation activation must equal the exact BLOCKED, FOUNDER_BOOTSTRAPPED/FBE-0001, or CONNECTED_QUALIFIED lifecycle profile."
   }
 }

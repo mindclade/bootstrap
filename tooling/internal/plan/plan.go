@@ -2166,42 +2166,88 @@ func validateCompiledFederationActivation(bootstrap map[string]any, violations *
 	active := stringSetFromList(activation["active_subject_ids"])
 	gated := stringSetFromList(activation["gated_subject_ids"])
 	blockers := stringSetFromList(activation["blockers"])
-	expectedActive := stringSet(
+	blockedActive := stringSet(
 		"bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification",
 		"infrastructure-live-development-plan", "infrastructure-live-development-apply",
 		"infrastructure-live-staging-plan", "infrastructure-live-staging-apply",
 		"infrastructure-live-production-plan", "infrastructure-live-production-apply",
 		"infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply",
 	)
-	expectedGated := stringSet(
+	blockedGated := stringSet(
 		"github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply",
 		"infrastructure-drift-plan", "infrastructure-ci-evidence-verifier",
 	)
-	expectedBlockers := stringSet(
-		"github-config-control-plane-federation-not-connected-qualified",
-		"infrastructure-drift-federation-not-connected-qualified",
-		"ci-evidence-federation-not-connected-qualified",
-	)
-	if !ok || activation["state"] != "blocked" || !sameStringSet(active, expectedActive) ||
-		!sameStringSet(gated, expectedGated) || !sameStringSet(blockers, expectedBlockers) ||
-		len(active)+len(gated) != 16 {
-		*violations = append(*violations, "compiled federation activation must classify exactly eleven active and five source-complete gated catalog subjects with the three exact blockers")
+	allSubjects := map[string]bool{}
+	for subject := range blockedActive {
+		allSubjects[subject] = true
+	}
+	for subject := range blockedGated {
+		allSubjects[subject] = true
+	}
+	founderActive := map[string]bool{}
+	for subject := range blockedActive {
+		founderActive[subject] = true
+	}
+	founderActive["github-config-protected-plan"] = true
+	founderActive["github-config-protected-apply"] = true
+	founderGated := stringSet("github-config-drift-plan", "infrastructure-drift-plan", "infrastructure-ci-evidence-verifier")
+	state := stringValue(activation["state"])
+	valid := ok
+	githubConfigActivationEnabled := false
+	connectedActivationEnabled := false
+	switch state {
+	case "BLOCKED":
+		_, exceptionPresent := activation["exception_ref"]
+		valid = valid && !exceptionPresent && sameStringSet(active, blockedActive) && sameStringSet(gated, blockedGated) &&
+			sameStringSet(blockers, stringSet(
+				"github-config-control-plane-federation-not-connected-qualified",
+				"infrastructure-drift-federation-not-connected-qualified",
+				"ci-evidence-federation-not-connected-qualified",
+			))
+	case "FOUNDER_BOOTSTRAPPED":
+		githubConfigActivationEnabled = true
+		valid = valid && activation["exception_ref"] == "FBE-0001" && sameStringSet(active, founderActive) && sameStringSet(gated, founderGated) &&
+			sameStringSet(blockers, stringSet("independent-review-not-connected-qualified", "production-authority-disabled"))
+	case "CONNECTED_QUALIFIED":
+		githubConfigActivationEnabled = true
+		connectedActivationEnabled = true
+		_, exceptionPresent := activation["exception_ref"]
+		valid = valid && !exceptionPresent && sameStringSet(active, allSubjects) && len(gated) == 0 && len(blockers) == 0
+	default:
+		valid = false
+	}
+	githubConfig, _ := bootstrap["github_config"].(map[string]any)
+	infrastructure, _ := bootstrap["github_infrastructure"].(map[string]any)
+	drift, _ := infrastructure["drift"].(map[string]any)
+	ciEvidence, _ := bootstrap["github_ci_evidence"].(map[string]any)
+	valid = valid && githubConfig["activation_enabled"] == githubConfigActivationEnabled &&
+		drift["activation_enabled"] == connectedActivationEnabled && ciEvidence["activation_enabled"] == connectedActivationEnabled
+	if !valid {
+		*violations = append(*violations, "compiled federation activation and conditional provider graphs must equal the exact BLOCKED, FOUNDER_BOOTSTRAPPED/FBE-0001 foundation-only, or CONNECTED_QUALIFIED lifecycle profile")
 	}
 }
 
 func validateCompiledGithubConfigGraph(resources []resourceChange, bootstrap map[string]any, projects map[string]string, violations *[]string) {
 	declaration, ok := bootstrap["github_config"].(map[string]any)
 	identities, identitiesOK := declaration["identities"].(map[string]any)
+	enabled, enabledOK := declaration["activation_enabled"].(bool)
+	activation, activationOK := bootstrap["github_activation"].(map[string]any)
+	activeSubjects := stringSetFromList(activation["active_subject_ids"])
 	expectedSubjects := map[string]map[string]bool{
 		"plan":  stringSet("github-config-drift-plan", "github-config-protected-plan"),
 		"apply": stringSet("github-config-protected-apply"),
 	}
-	valid := ok && identitiesOK && declaration["activation_enabled"] == false && declaration["pool_id"] == "github-config" &&
+	valid := ok && identitiesOK && enabledOK && activationOK && declaration["pool_id"] == "github-config" &&
 		declaration["issuer_uri"] == "https://token.actions.githubusercontent.com" &&
 		declaration["repository_owner_id"] == "316676129" && declaration["repository_id"] == "1350986053" &&
 		declaration["immutable_repository"] == "mindclade@316676129/github-config@1350986053" &&
 		declaration["repository_full_name"] == "mindclade/github-config" && declaration["branch_ref"] == "refs/heads/main" &&
 		sameStringSet(stringSetFromMap(identities), stringSet("plan", "apply"))
+	poolAddress := indexedResourceAddress("module.github_federation.google_iam_workload_identity_pool.github_config", "pool")
+	pool := resourceAfter(resources, poolAddress)
+	if enabled && (pool == nil || pool["project"] != projects["identity"] || pool["workload_identity_pool_id"] != declaration["pool_id"]) {
+		*violations = append(*violations, poolAddress+" must exactly equal the compiled identity project and github-config pool ID")
+	}
 	for _, identityKey := range []string{"plan", "apply"} {
 		identity, _ := identities[identityKey].(map[string]any)
 		accountID := "github-config-" + identityKey
@@ -2214,22 +2260,43 @@ func validateCompiledGithubConfigGraph(resources []resourceChange, bootstrap map
 		}
 		valid = valid && identity["provider_id"] == accountID && identity["service_account_id"] == accountID &&
 			sameStringSet(seenSubjects, expectedSubjects[identityKey])
+		activeIdentitySubjects := map[string]bool{}
+		for subject := range expectedSubjects[identityKey] {
+			if activeSubjects[subject] {
+				activeIdentitySubjects[subject] = true
+			}
+		}
+		identityEnabled := enabled && len(activeIdentitySubjects) > 0
 		address := indexedResourceAddress("module.github_federation.google_service_account.github_config", identityKey)
 		service := resourceAfter(resources, address)
 		if service == nil || service["project"] != projects["identity"] || service["account_id"] != accountID {
-			*violations = append(*violations, address+" must preserve the exact roleless github-config source-stub account")
+			*violations = append(*violations, address+" must preserve the exact roleless github-config account")
+		}
+		providerAddress := indexedResourceAddress("module.github_federation.google_iam_workload_identity_pool_provider.github_config", identityKey)
+		bindingAddress := indexedResourceAddress("module.github_federation.google_service_account_iam_member.github_config", identityKey)
+		if identityEnabled {
+			provider := resourceAfter(resources, providerAddress)
+			if provider == nil || provider["project"] != projects["identity"] || provider["workload_identity_pool_id"] != declaration["pool_id"] || provider["workload_identity_pool_provider_id"] != identity["provider_id"] ||
+				provider["attribute_condition"] != githubConfigProviderConditionForSubjects(identityKey, activeSubjects) {
+				*violations = append(*violations, providerAddress+" must exactly equal its compiled identity project, pool, and provider ID")
+			}
+			validateCompiledFederationBinding(bindingAddress, resourceAfter(resources, bindingAddress), pool, accountID, projects["identity"], "github_config_identity", identityKey, violations)
+		} else if resourceAfter(resources, providerAddress) != nil || resourceAfter(resources, bindingAddress) != nil {
+			*violations = append(*violations, providerAddress+" and its binding must be absent while all identity subjects are lifecycle-gated")
 		}
 	}
-	for _, resource := range resources {
-		base := resourceAddressBase(resource.Address)
-		if base == "module.github_federation.google_iam_workload_identity_pool.github_config" ||
-			base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" ||
-			base == "module.github_federation.google_service_account_iam_member.github_config" {
-			*violations = append(*violations, resource.Address+" must be absent while github-config federation activation is disabled")
+	if !enabled {
+		for _, resource := range resources {
+			base := resourceAddressBase(resource.Address)
+			if base == "module.github_federation.google_iam_workload_identity_pool.github_config" ||
+				base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" ||
+				base == "module.github_federation.google_service_account_iam_member.github_config" {
+				*violations = append(*violations, resource.Address+" must be absent while github-config federation activation is BLOCKED")
+			}
 		}
 	}
 	if !valid {
-		*violations = append(*violations, "compiled github-config federation must retain its exact immutable repository and three activation-gated catalog subjects")
+		*violations = append(*violations, "compiled github-config federation must retain its exact immutable repository and three lifecycle-controlled catalog subjects")
 	}
 }
 
@@ -2268,7 +2335,7 @@ func bootstrapProviderCondition(github map[string]any, environment, workflowRef 
 		"assertion.repository_owner == 'mindclade'",
 		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(github["repository_id"])),
 		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(github["repository_owner_id"])),
-		"assertion.repository_visibility == 'private'",
+		"assertion.repository_visibility == 'public'",
 		fmt.Sprintf("assertion.ref == '%s'", stringValue(github["branch_ref"])),
 		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
 		"assertion.workflow_sha == assertion.sha",
@@ -2291,26 +2358,37 @@ func validateCompiledInfrastructureFederationGraph(resources []resourceChange, b
 		return
 	}
 	drift, driftOK := declaration["drift"].(map[string]any)
-	driftValid := driftOK && drift["activation_enabled"] == false && drift["subject_id"] == "infrastructure-drift-plan" &&
+	driftEnabled, driftEnabledOK := drift["activation_enabled"].(bool)
+	driftValid := driftOK && driftEnabledOK && drift["subject_id"] == "infrastructure-drift-plan" &&
 		drift["provider_id"] == "infrastructure-plan" && drift["service_account_id"] == "infrastructure-plan" &&
 		drift["workflow_ref"] == "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main" &&
 		drift["environment"] == "trusted-build" && drift["audience"] == "sts.googleapis.com"
 	driftServiceAddress := indexedResourceAddress(prefix+"google_service_account.infrastructure_drift", "drift")
 	driftService := resourceAfter(resources, driftServiceAddress)
 	if !driftValid || driftService == nil || driftService["project"] != projects["identity"] || driftService["account_id"] != "infrastructure-plan" {
-		*violations = append(*violations, driftServiceAddress+" must preserve the exact roleless activation-gated infrastructure drift identity")
-	}
-	for _, resource := range resources {
-		base := resourceAddressBase(resource.Address)
-		if base == prefix+"google_iam_workload_identity_pool_provider.infrastructure_drift" ||
-			base == prefix+"google_service_account_iam_member.infrastructure_drift" {
-			*violations = append(*violations, resource.Address+" must be absent while infrastructure drift federation activation is disabled")
-		}
+		*violations = append(*violations, driftServiceAddress+" must preserve the exact roleless lifecycle-controlled infrastructure drift identity")
 	}
 	poolAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool.infrastructure_live", "pool")
 	pool := resourceAfter(resources, poolAddress)
 	if pool == nil || pool["project"] != projects["identity"] || pool["workload_identity_pool_id"] != declaration["pool_id"] {
 		*violations = append(*violations, poolAddress+" must exactly equal the compiled identity project and infrastructure-live pool ID")
+	}
+	if driftEnabled {
+		providerAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool_provider.infrastructure_drift", "drift")
+		bindingAddress := indexedResourceAddress(prefix+"google_service_account_iam_member.infrastructure_drift", "drift")
+		provider := resourceAfter(resources, providerAddress)
+		if provider == nil || provider["project"] != projects["identity"] || provider["workload_identity_pool_id"] != declaration["pool_id"] || provider["workload_identity_pool_provider_id"] != drift["provider_id"] {
+			*violations = append(*violations, providerAddress+" must exactly equal its compiled identity project, pool, and provider ID")
+		}
+		validateCompiledFederationBinding(bindingAddress, resourceAfter(resources, bindingAddress), pool, stringValue(drift["service_account_id"]), projects["identity"], "infrastructure_identity", "drift-plan", violations)
+	} else {
+		for _, resource := range resources {
+			base := resourceAddressBase(resource.Address)
+			if base == prefix+"google_iam_workload_identity_pool_provider.infrastructure_drift" ||
+				base == prefix+"google_service_account_iam_member.infrastructure_drift" {
+				*violations = append(*violations, resource.Address+" must be absent while infrastructure drift federation activation is BLOCKED")
+			}
+		}
 	}
 	expectedMapping := map[string]string{
 		"attribute.repository_id":       "assertion.repository_id",
@@ -2366,7 +2444,7 @@ func infrastructureProviderCondition(declaration map[string]any, environment str
 		"assertion.repository_owner == 'mindclade'",
 		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(declaration["repository_owner_id"])),
 		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(declaration["repository_id"])),
-		"assertion.repository_visibility == 'private'",
+		"assertion.repository_visibility == 'public'",
 		fmt.Sprintf("assertion.ref == '%s'", stringValue(declaration["branch_ref"])),
 		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
 		"assertion.workflow_sha == assertion.sha",
@@ -2408,7 +2486,7 @@ func validateCompiledCIEvidenceGraph(resources []resourceChange, bootstrap map[s
 			base == prefix+"google_service_account_iam_member.ci_evidence"
 	}
 	if !declarationOK || !enabledOK {
-		*violations = append(*violations, "root-trust variables must declare the source-gated CI-evidence federation")
+		*violations = append(*violations, "root-trust variables must declare the lifecycle-controlled CI-evidence federation")
 		return
 	}
 	if !enabled {
@@ -3739,14 +3817,14 @@ func validateCIEvidenceProviderClaims(resource resourceChange, after map[string]
 	case "writer":
 		expectedMapping["attribute.job_workflow_ref"] = "assertion.job_workflow_ref"
 		expectedMapping["attribute.job_workflow_sha"] = "assertion.job_workflow_sha"
-		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id in \['1350980188', '1350986053', '1350991612', '1350991963', '1350992171', '1351193819'\] && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.job_workflow_ref == 'mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})' && assertion\.job_workflow_sha == '([0-9a-f]{40})' && \(\(assertion\.event_name == 'push' && assertion\.ref == 'refs/heads/main'\) \|\| \(assertion\.event_name == 'release' && assertion\.ref\.startsWith\('refs/tags/v'\)\)\)$`)
+		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id in \['1350980188', '1350986053', '1350991612', '1350991963', '1350992171', '1351193819'\] && assertion\.repository_visibility == 'public' && assertion\.runner_environment == 'github-hosted' && assertion\.job_workflow_ref == 'mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})' && assertion\.job_workflow_sha == '([0-9a-f]{40})' && \(\(assertion\.event_name == 'push' && assertion\.ref == 'refs/heads/main'\) \|\| \(assertion\.event_name == 'release' && assertion\.ref\.startsWith\('refs/tags/v'\)\)\)$`)
 		matches := pattern.FindStringSubmatch(condition)
 		validCondition = len(matches) == 3 && matches[1] == matches[2]
 	case "verifier":
 		expectedMapping["attribute.workflow_ref"] = "assertion.workflow_ref"
 		expectedMapping["attribute.workflow_sha"] = "assertion.workflow_sha"
 		expectedMapping["attribute.environment"] = "assertion.environment"
-		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id == '1350992171' && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.workflow_ref == 'mindclade/infrastructure-live/\.github/workflows/disaster-recovery\.yml@refs/heads/main' && assertion\.workflow_sha == '[0-9a-f]{40}' && assertion\.ref == 'refs/heads/main' && assertion\.event_name == 'workflow_dispatch' && assertion\.environment == 'infrastructure-apply'$`)
+		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id == '1350992171' && assertion\.repository_visibility == 'public' && assertion\.runner_environment == 'github-hosted' && assertion\.workflow_ref == 'mindclade/infrastructure-live/\.github/workflows/disaster-recovery\.yml@refs/heads/main' && assertion\.workflow_sha == '[0-9a-f]{40}' && assertion\.ref == 'refs/heads/main' && assertion\.event_name == 'workflow_dispatch' && assertion\.environment == 'infrastructure-apply'$`)
 		validCondition = pattern.MatchString(condition)
 	}
 	oidc := firstObject(after["oidc"])
@@ -3770,20 +3848,29 @@ func validateGithubConfigProviderClaims(resource resourceChange, after map[strin
 		"attribute.runner_environment":     "assertion.runner_environment",
 	}
 	oidc := firstObject(after["oidc"])
+	condition := stringValue(after["attribute_condition"])
+	validCondition := condition == githubConfigProviderCondition(instance)
+	if instance == "plan" {
+		validCondition = validCondition || condition == githubConfigProviderConditionForSubjects(instance, stringSet("github-config-protected-plan"))
+	}
 	if !indexed || !stringSet("plan", "apply")[instance] || !exactStringMap(after["attribute_mapping"], expectedMapping) ||
-		after["attribute_condition"] != githubConfigProviderCondition(instance) ||
+		!validCondition ||
 		!exactStringSet(oidc["allowed_audiences"], []string{"sts.googleapis.com"}) {
 		*violations = append(*violations, resource.Address+" must bind the exact github-config immutable custom subjects and singleton audience")
 	}
 }
 
 func githubConfigProviderCondition(instance string) string {
+	return githubConfigProviderConditionForSubjects(instance, nil)
+}
+
+func githubConfigProviderConditionForSubjects(instance string, activeSubjects map[string]bool) string {
 	base := []string{
 		"assertion.repository == 'mindclade/github-config'",
 		"assertion.repository_owner == 'mindclade'",
 		"assertion.repository_owner_id == '316676129'",
 		"assertion.repository_id == '1350986053'",
-		"assertion.repository_visibility == 'private'",
+		"assertion.repository_visibility == 'public'",
 		"assertion.runner_environment == 'github-hosted'",
 	}
 	subject := func(workflowRef, contextType, contextValue string) string {
@@ -3797,12 +3884,16 @@ func githubConfigProviderCondition(instance string) string {
 	}
 	conditions := []string{}
 	if instance == "plan" {
-		conditions = []string{
-			subject("mindclade/github-config/.github/workflows/drift-detection.yml@refs/heads/main", "ref", "refs/heads/main"),
-			subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "trusted-build"),
+		if activeSubjects == nil || activeSubjects["github-config-drift-plan"] {
+			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/drift-detection.yml@refs/heads/main", "ref", "refs/heads/main"))
+		}
+		if activeSubjects == nil || activeSubjects["github-config-protected-plan"] {
+			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "trusted-build"))
 		}
 	} else if instance == "apply" {
-		conditions = []string{subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "infrastructure-apply")}
+		if activeSubjects == nil || activeSubjects["github-config-protected-apply"] {
+			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "infrastructure-apply"))
+		}
 	}
 	return strings.Join(append(base, "("+strings.Join(conditions, " || ")+")"), " && ")
 }
@@ -3833,7 +3924,7 @@ func infrastructureDriftProviderCondition() string {
 		"assertion.repository_owner == 'mindclade'",
 		"assertion.repository_owner_id == '316676129'",
 		"assertion.repository_id == '1350992171'",
-		"assertion.repository_visibility == 'private'",
+		"assertion.repository_visibility == 'public'",
 		"assertion.ref == 'refs/heads/main'",
 		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
 		"assertion.workflow_sha == assertion.sha",

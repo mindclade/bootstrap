@@ -1413,7 +1413,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "assertion.repository_owner == 'mindclade'",
                         "assertion.repository_id == '1350991612'",
                         "assertion.repository_owner_id == '316676129'",
-                        "assertion.repository_visibility == 'private'",
+                        "assertion.repository_visibility == 'public'",
                         "assertion.ref == 'refs/heads/main'",
                         "assertion.workflow_ref == 'mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main'",
                         "assertion.workflow_sha == assertion.sha",
@@ -1498,7 +1498,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 [
                     "assertion.repository_owner_id == '316676129'",
                     f"assertion.repository_id in {repository_ids}",
-                    "assertion.repository_visibility in ['internal', 'private']",
+                    "assertion.repository_visibility == 'public'",
                     "assertion.runner_environment == 'github-hosted'",
                     (
                         "assertion.job_workflow_ref == "
@@ -1518,7 +1518,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 [
                     "assertion.repository_owner_id == '316676129'",
                     "assertion.repository_id == '1350992171'",
-                    "assertion.repository_visibility in ['internal', 'private']",
+                    "assertion.repository_visibility == 'public'",
                     "assertion.runner_environment == 'github-hosted'",
                     (
                         "assertion.workflow_ref == "
@@ -1662,7 +1662,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "assertion.repository_owner == 'mindclade'",
                 "assertion.repository_owner_id == '316676129'",
                 "assertion.repository_id == '1350992171'",
-                "assertion.repository_visibility == 'private'",
+                "assertion.repository_visibility == 'public'",
                 "assertion.ref == 'refs/heads/main'",
                 f"assertion.workflow_ref == '{workflow}'",
                 "assertion.workflow_sha == assertion.sha",
@@ -4285,7 +4285,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 {
                     "attribute_condition": provider["change"]["after"][
                         "attribute_condition"
-                    ].replace("repository_visibility == 'private'", "repository_visibility != 'public'")
+                    ].replace("repository_visibility == 'public'", "repository_visibility != 'public'")
                 }
             ),
             lambda provider, binding: provider["change"]["after"][

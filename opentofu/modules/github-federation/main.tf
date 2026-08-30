@@ -63,7 +63,14 @@ locals {
     }
   }
 
-  active_ci_evidence_identities = var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}
+  github_config_federation_state = contains(["FOUNDER_BOOTSTRAPPED", "CONNECTED_QUALIFIED"], var.activation.state)
+  connected_federation_state     = var.activation.state == "CONNECTED_QUALIFIED"
+  activation_flags_valid = (
+    var.github_config.activation_enabled == local.github_config_federation_state &&
+    var.infrastructure_live.drift.activation_enabled == local.connected_federation_state &&
+    var.ci_evidence.activation_enabled == local.connected_federation_state
+  )
+  active_ci_evidence_identities = local.connected_federation_state && var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}
   ci_evidence_repository_ids    = join(", ", [for repository_id in sort(values(var.ci_evidence.repository_ids)) : "'${repository_id}'"])
   ci_evidence_writer_sha        = split("@", var.ci_evidence.writer.job_workflow_ref)[1]
 
@@ -78,7 +85,6 @@ locals {
       service_email = "${identity.service_account_id}@${var.project_id}.iam.gserviceaccount.com"
     })
   }
-  active_github_config_identities = var.github_config.activation_enabled ? local.github_config_identities : {}
   github_config_subject_conditions = {
     for key, identity in local.github_config_identities : key => [
       for subject in identity.subjects : join(" && ", [
@@ -86,9 +92,13 @@ locals {
         "assertion.workflow_ref == '${subject.workflow_ref}'",
         "assertion.workflow_sha == assertion.sha",
         subject.context_type == "environment" ? "assertion.environment == '${subject.context_value}'" : "assertion.ref == '${subject.context_value}'",
-      ])
+      ]) if contains(var.activation.active_subject_ids, subject.id)
     ]
   }
+  active_github_config_identities = local.github_config_federation_state && var.github_config.activation_enabled ? {
+    for key, identity in local.github_config_identities : key => identity
+    if length(local.github_config_subject_conditions[key]) > 0
+  } : {}
   infrastructure_drift = merge(var.infrastructure_live.drift, {
     service_email = "${var.infrastructure_live.drift.service_account_id}@${var.project_id}.iam.gserviceaccount.com"
   })
@@ -139,7 +149,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_id == '${var.repository_id}'",
     "assertion.repository_owner_id == '${var.repository_owner_id}'",
-    "assertion.repository_visibility == 'private'",
+    "assertion.repository_visibility == 'public'",
     "assertion.ref == '${var.branch_ref}'",
     "assertion.workflow_ref == '${each.value.workflow_ref}'",
     "assertion.workflow_sha == assertion.sha",
@@ -186,7 +196,7 @@ resource "google_service_account_iam_member" "github" {
 }
 
 resource "google_iam_workload_identity_pool" "github_config" {
-  for_each = var.github_config.activation_enabled ? { pool = true } : {}
+  for_each = local.github_config_federation_state && var.github_config.activation_enabled ? { pool = true } : {}
 
   project                   = var.project_id
   workload_identity_pool_id = var.github_config.pool_id
@@ -207,7 +217,7 @@ resource "google_iam_workload_identity_pool_provider" "github_config" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_config["pool"].workload_identity_pool_id
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "github-config ${each.key}"
-  description                        = "Exact activation-gated GitHub trust for github-config ${each.key}"
+  description                        = "Exact lifecycle-controlled GitHub trust for github-config ${each.key}"
   disabled                           = false
   deletion_policy                    = "PREVENT"
 
@@ -228,7 +238,7 @@ resource "google_iam_workload_identity_pool_provider" "github_config" {
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.github_config.repository_owner_id}'",
     "assertion.repository_id == '${var.github_config.repository_id}'",
-    "assertion.repository_visibility == 'private'",
+    "assertion.repository_visibility == 'public'",
     "assertion.runner_environment == 'github-hosted'",
     "(${join(" || ", [for condition in local.github_config_subject_conditions[each.key] : "(${condition})"])})",
   ])
@@ -249,22 +259,30 @@ resource "google_service_account" "github_config" {
   project         = var.project_id
   account_id      = each.value.service_account_id
   display_name    = "github-config ${each.key}"
-  description     = "Role-separated github-config ${each.key} identity; federation is activation-gated"
+  description     = "Role-separated github-config ${each.key} identity; federation is lifecycle-controlled"
   deletion_policy = "PREVENT"
 
   lifecycle {
     prevent_destroy = true
+
+    precondition {
+      condition     = local.activation_flags_valid
+      error_message = "Conditional federation activation flags must exactly match the declared lifecycle state."
+    }
   }
 }
 
 resource "google_service_account_iam_member" "github_config" {
   for_each = local.active_github_config_identities
 
-  service_account_id = google_service_account.github_config[each.key].name
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${each.value.service_email}"
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_config["pool"].name}/attribute.github_config_identity/${each.key}"
 
-  depends_on = [google_iam_workload_identity_pool_provider.github_config]
+  depends_on = [
+    google_iam_workload_identity_pool_provider.github_config,
+    google_service_account.github_config,
+  ]
 }
 
 resource "google_iam_workload_identity_pool" "infrastructure_live" {
@@ -309,7 +327,7 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_live" {
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.infrastructure_live.repository_owner_id}'",
     "assertion.repository_id == '${var.infrastructure_live.repository_id}'",
-    "assertion.repository_visibility == 'private'",
+    "assertion.repository_visibility == 'public'",
     "assertion.ref == '${var.infrastructure_live.branch_ref}'",
     "assertion.workflow_ref == '${var.infrastructure_live.workflow_ref}'",
     "assertion.workflow_sha == assertion.sha",
@@ -356,13 +374,13 @@ resource "google_service_account_iam_member" "infrastructure_live" {
 }
 
 resource "google_iam_workload_identity_pool_provider" "infrastructure_drift" {
-  for_each = var.infrastructure_live.drift.activation_enabled ? { drift = local.infrastructure_drift } : {}
+  for_each = local.connected_federation_state && var.infrastructure_live.drift.activation_enabled ? { drift = local.infrastructure_drift } : {}
 
   project                            = var.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.infrastructure_live["pool"].workload_identity_pool_id
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "infrastructure-live drift plan"
-  description                        = "Exact activation-gated GitHub trust for infrastructure-live drift observation"
+  description                        = "Exact lifecycle-controlled GitHub trust for infrastructure-live drift observation"
   disabled                           = false
   deletion_policy                    = "PREVENT"
 
@@ -382,7 +400,7 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_drift" {
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.infrastructure_live.repository_owner_id}'",
     "assertion.repository_id == '${var.infrastructure_live.repository_id}'",
-    "assertion.repository_visibility == 'private'",
+    "assertion.repository_visibility == 'public'",
     "assertion.ref == '${var.infrastructure_live.branch_ref}'",
     "assertion.workflow_ref == '${each.value.workflow_ref}'",
     "assertion.workflow_sha == assertion.sha",
@@ -406,7 +424,7 @@ resource "google_service_account" "infrastructure_drift" {
   project         = var.project_id
   account_id      = each.value.service_account_id
   display_name    = "infrastructure-live drift plan"
-  description     = "Roleless infrastructure drift identity; federation is activation-gated"
+  description     = "Roleless infrastructure drift identity; federation is lifecycle-controlled"
   deletion_policy = "PREVENT"
 
   lifecycle {
@@ -415,7 +433,7 @@ resource "google_service_account" "infrastructure_drift" {
 }
 
 resource "google_service_account_iam_member" "infrastructure_drift" {
-  for_each = var.infrastructure_live.drift.activation_enabled ? { drift = local.infrastructure_drift } : {}
+  for_each = local.connected_federation_state && var.infrastructure_live.drift.activation_enabled ? { drift = local.infrastructure_drift } : {}
 
   service_account_id = google_service_account.infrastructure_drift["drift"].name
   role               = "roles/iam.workloadIdentityUser"
@@ -425,7 +443,7 @@ resource "google_service_account_iam_member" "infrastructure_drift" {
 }
 
 resource "google_iam_workload_identity_pool" "ci_evidence" {
-  for_each = var.ci_evidence.activation_enabled ? { archive = true } : {}
+  for_each = local.connected_federation_state && var.ci_evidence.activation_enabled ? { archive = true } : {}
 
   project                   = var.project_id
   workload_identity_pool_id = var.ci_evidence.pool_id
@@ -474,7 +492,7 @@ resource "google_iam_workload_identity_pool_provider" "ci_evidence" {
   attribute_condition = each.key == "writer" ? join(" && ", [
     "assertion.repository_owner_id == '${var.ci_evidence.repository_owner_id}'",
     "assertion.repository_id in [${local.ci_evidence_repository_ids}]",
-    "assertion.repository_visibility in ['internal', 'private']",
+    "assertion.repository_visibility == 'public'",
     "assertion.runner_environment == 'github-hosted'",
     "assertion.job_workflow_ref == '${var.ci_evidence.writer.job_workflow_ref}'",
     "assertion.job_workflow_sha == '${local.ci_evidence_writer_sha}'",
@@ -482,7 +500,7 @@ resource "google_iam_workload_identity_pool_provider" "ci_evidence" {
     ]) : join(" && ", [
     "assertion.repository_owner_id == '${var.ci_evidence.repository_owner_id}'",
     "assertion.repository_id == '${var.ci_evidence.verifier.repository_id}'",
-    "assertion.repository_visibility in ['internal', 'private']",
+    "assertion.repository_visibility == 'public'",
     "assertion.runner_environment == 'github-hosted'",
     "assertion.workflow_ref == '${var.ci_evidence.verifier.workflow_ref}'",
     "assertion.workflow_sha == '${var.ci_evidence.verifier.workflow_sha}'",

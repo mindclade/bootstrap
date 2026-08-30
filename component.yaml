@@ -19,7 +19,7 @@ spec:
   operational_reviewers:
     - platform-operations
   repository_class: infrastructure-source
-  data_classification: restricted
+  data_classification: public
   trust_tier: ring-0
   recovery_tier: isolated-ring-0
   production_authority: false

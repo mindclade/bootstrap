@@ -382,7 +382,7 @@ func validateComponent(root string) error {
 	}
 	if component.Spec.Type != "bootstrap-control-plane" || component.Spec.Lifecycle != "pre-production" || component.Spec.Maturity != "pre-production" ||
 		component.Spec.Owner != "security" || component.Spec.RepositoryClass != "infrastructure-source" ||
-		component.Spec.DataClassification != "restricted" || component.Spec.TrustTier != "ring-0" ||
+		component.Spec.DataClassification != "public" || component.Spec.TrustTier != "ring-0" ||
 		component.Spec.RecoveryTier != "isolated-ring-0" || component.Spec.ProductionAuthority {
 		return fmt.Errorf("validate component.yaml: owner/readiness/authority contract is invalid")
 	}
@@ -689,7 +689,7 @@ func validateRecoveryWorkflowContract(root string) error {
 		problems = append(problems, "workflow name must remain recovery-verification")
 	}
 	if !exactStringMap(workflow["env"], map[string]string{
-		"GO_VERSION": "1.26.6", "JUST_VERSION": "1.55.1", "PYTHON_VERSION": "3.14.7",
+		"GO_VERSION": "1.26.7", "JUST_VERSION": "1.55.1", "PYTHON_VERSION": "3.14.7",
 		"TOFU_VERSION": qualifiedTofuVersion, "USE_BAZEL_VERSION": "9.1.1",
 	}) {
 		problems = append(problems, "recovery workflow tool versions must equal the exact qualified set")
@@ -1720,8 +1720,9 @@ func (c *compiler) validateContracts() {
 	c.expect(federation, "assertion.name", "spec", "workforce", "attributeMapping", "displayName")
 	c.expect(federation, "assertion.groups", "spec", "workforce", "attributeMapping", "groups")
 	c.expectKeys(federation, []string{"github", "github-config", "github-infrastructure", "github-ci-evidence", "buildkite", "gitops"}, "spec", "workloadIdentityProviders")
-	c.expect(federation, "blocked", "spec", "activation", "state")
-	c.expectStrings(federation, []string{
+	activation := c.objectAt(federation, "spec", "activation")
+	activationState := c.stringAt(federation, "spec", "activation", "state")
+	blockedActiveSubjects := []string{
 		"bootstrap-protected-plan",
 		"bootstrap-protected-apply",
 		"bootstrap-recovery-verification",
@@ -1733,19 +1734,57 @@ func (c *compiler) validateContracts() {
 		"infrastructure-live-production-apply",
 		"infrastructure-live-restricted-plan",
 		"infrastructure-live-restricted-apply",
-	}, "spec", "activation", "activeSubjectIds")
-	c.expectStrings(federation, []string{
+	}
+	blockedGatedSubjects := []string{
 		"github-config-drift-plan",
 		"github-config-protected-plan",
 		"github-config-protected-apply",
 		"infrastructure-drift-plan",
 		"infrastructure-ci-evidence-verifier",
-	}, "spec", "activation", "gatedSubjectIds")
-	c.expectStrings(federation, []string{
-		"github-config-control-plane-federation-not-connected-qualified",
-		"infrastructure-drift-federation-not-connected-qualified",
-		"ci-evidence-federation-not-connected-qualified",
-	}, "spec", "activation", "blockers")
+	}
+	founderActiveSubjects := append(append([]string{}, blockedActiveSubjects...),
+		"github-config-protected-plan", "github-config-protected-apply")
+	founderGatedSubjects := []string{
+		"github-config-drift-plan",
+		"infrastructure-drift-plan",
+		"infrastructure-ci-evidence-verifier",
+	}
+	allFederationSubjects := append(append([]string{}, blockedActiveSubjects...), blockedGatedSubjects...)
+	githubConfigActivationEnabled := false
+	connectedActivationEnabled := false
+	switch activationState {
+	case "BLOCKED":
+		c.expectStrings(federation, blockedActiveSubjects, "spec", "activation", "activeSubjectIds")
+		c.expectStrings(federation, blockedGatedSubjects, "spec", "activation", "gatedSubjectIds")
+		c.expectStrings(federation, []string{
+			"github-config-control-plane-federation-not-connected-qualified",
+			"infrastructure-drift-federation-not-connected-qualified",
+			"ci-evidence-federation-not-connected-qualified",
+		}, "spec", "activation", "blockers")
+		if _, present := activation["exceptionRef"]; present {
+			c.problem("%s.spec.activation.exceptionRef must be absent while federation activation is BLOCKED", federation)
+		}
+	case "FOUNDER_BOOTSTRAPPED":
+		githubConfigActivationEnabled = true
+		c.expect(federation, "FBE-0001", "spec", "activation", "exceptionRef")
+		c.expectStrings(federation, founderActiveSubjects, "spec", "activation", "activeSubjectIds")
+		c.expectStrings(federation, founderGatedSubjects, "spec", "activation", "gatedSubjectIds")
+		c.expectStrings(federation, []string{
+			"independent-review-not-connected-qualified",
+			"production-authority-disabled",
+		}, "spec", "activation", "blockers")
+	case "CONNECTED_QUALIFIED":
+		githubConfigActivationEnabled = true
+		connectedActivationEnabled = true
+		c.expectStrings(federation, allFederationSubjects, "spec", "activation", "activeSubjectIds")
+		c.expectStrings(federation, []string{}, "spec", "activation", "gatedSubjectIds")
+		c.expectStrings(federation, []string{}, "spec", "activation", "blockers")
+		if _, present := activation["exceptionRef"]; present {
+			c.problem("%s.spec.activation.exceptionRef must be absent after connected qualification", federation)
+		}
+	default:
+		c.problem("%s.spec.activation.state must be BLOCKED, FOUNDER_BOOTSTRAPPED, or CONNECTED_QUALIFIED", federation)
+	}
 
 	githubBase := []string{"spec", "workloadIdentityProviders", "github"}
 	c.validateProviderContract(federation, githubBase, "github", "identity-root", map[string]string{
@@ -1803,7 +1842,7 @@ func (c *compiler) validateContracts() {
 	githubConfigBase := []string{"spec", "workloadIdentityProviders", "github-config"}
 	c.expect(federation, "github", append(githubConfigBase, "platform")...)
 	c.expect(federation, "identity-root", append(githubConfigBase, "projectRef")...)
-	c.expect(federation, false, append(githubConfigBase, "activationEnabled")...)
+	c.expect(federation, githubConfigActivationEnabled, append(githubConfigBase, "activationEnabled")...)
 	c.expect(federation, "github-config", append(githubConfigBase, "poolId")...)
 	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(githubConfigBase, "issuerUri")...)
 	c.expect(federation, "assertion.sub", append(githubConfigBase, "subjectClaim")...)
@@ -1858,7 +1897,7 @@ func (c *compiler) validateContracts() {
 	c.expect(federation, "refs/heads/main", append(infrastructureBase, "branchRef", "literal")...)
 	c.expect(federation, "mindclade/infrastructure-live/.github/workflows/protected-apply.yml@refs/heads/main", append(infrastructureBase, "workflowRef", "literal")...)
 	infrastructureDriftBase := append(append([]string{}, infrastructureBase...), "drift")
-	c.expect(federation, false, append(infrastructureDriftBase, "activationEnabled")...)
+	c.expect(federation, connectedActivationEnabled, append(infrastructureDriftBase, "activationEnabled")...)
 	c.expect(federation, "infrastructure-drift-plan", append(infrastructureDriftBase, "subjectId")...)
 	c.expect(federation, "infrastructure-plan", append(infrastructureDriftBase, "providerId")...)
 	c.expect(federation, "infrastructure-plan", append(infrastructureDriftBase, "serviceAccountId")...)
@@ -1889,7 +1928,7 @@ func (c *compiler) validateContracts() {
 	ciEvidenceBase := []string{"spec", "workloadIdentityProviders", "github-ci-evidence"}
 	c.expect(federation, "github", append(ciEvidenceBase, "platform")...)
 	c.expect(federation, "identity-root", append(ciEvidenceBase, "projectRef")...)
-	c.expect(federation, false, append(ciEvidenceBase, "activationEnabled")...)
+	c.expect(federation, connectedActivationEnabled, append(ciEvidenceBase, "activationEnabled")...)
 	c.expect(federation, "github-ci-evidence", append(ciEvidenceBase, "poolId")...)
 	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(ciEvidenceBase, "issuerUri")...)
 	c.expect(federation, "assertion.sub", append(ciEvidenceBase, "subjectClaim")...)
@@ -2376,6 +2415,9 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		"active_subject_ids": c.stringsAt(federation, "spec", "activation", "activeSubjectIds"),
 		"gated_subject_ids":  c.stringsAt(federation, "spec", "activation", "gatedSubjectIds"),
 		"blockers":           c.stringsAt(federation, "spec", "activation", "blockers"),
+	}
+	if exceptionRef, present := c.objectAt(federation, "spec", "activation")["exceptionRef"].(string); present {
+		githubActivation["exception_ref"] = exceptionRef
 	}
 
 	ciEvidenceBase := []string{"spec", "workloadIdentityProviders", "github-ci-evidence"}
