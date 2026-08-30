@@ -728,8 +728,11 @@ module "signing_root" {
   administrator_principals    = var.bootstrap.signing.administrators
   recovery_verifier_principal = local.recovery_principal
   keys                        = local.signing_keys
-  disabled_signing_keys       = toset(["infrastructure-export"])
-  labels                      = var.bootstrap.labels
+  disabled_signing_keys = toset([
+    "connected-observation-evidence",
+    "infrastructure-export",
+  ])
+  labels = var.bootstrap.labels
 
   depends_on = [module.github_federation]
 }

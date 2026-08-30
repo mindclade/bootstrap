@@ -1,5 +1,6 @@
 """Contract tests for the exact bootstrap tree and manifest schemas."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,7 @@ def valid_render_values():
         "AUDIT_RECOVERY_KMS_KEY": "audit-recovery",
         "AUDIT_SECURITY_READER_GROUP": "group:audit-security@example.com",
         "BOOTSTRAP_HANDOFF_SIGNER": "serviceAccount:handoff-signer@mindclade-signing-root.iam.gserviceaccount.com",
+        "CONNECTED_OBSERVATION_EVIDENCE_SIGNER": "serviceAccount:connected-observation@mindclade-identity-root.iam.gserviceaccount.com",
         "BREAK_GLASS_APPROVER_1": "user:security-approver-1@example.com",
         "BREAK_GLASS_APPROVER_2": "user:security-approver-2@example.com",
         "BREAK_GLASS_NOTIFICATION_RECIPIENT": "security-operations@example.com",
@@ -202,11 +204,15 @@ def valid_recovery_context(values):
                 "primary_version": (
                     "projects/mindclade-signing-root/locations/us-central1/"
                     f"keyRings/bootstrap-signing/cryptoKeys/{name}/cryptoKeyVersions/1"
-                )
+                ),
+                "public_key_pem_sha256": hashlib.sha256(
+                    f"test-only-public-key-fixture:{name}".encode("utf-8")
+                ).hexdigest(),
             }
             for name in (
                 "audit-anchor",
                 "bootstrap-handoff",
+                "connected-observation-evidence",
                 "github-config-plan-evidence",
                 "infrastructure-export",
                 "recovery-evidence",
@@ -1388,6 +1394,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 {
                     "audit-anchor",
                     "bootstrap-handoff",
+                    "connected-observation-evidence",
                     "github-config-plan-evidence",
                     "infrastructure-export",
                     "recovery-evidence",
@@ -1599,9 +1606,17 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 {
                     "audit-anchor",
                     "bootstrap-handoff",
+                    "connected-observation-evidence",
                     "github-config-plan-evidence",
                     "infrastructure-export",
                     "recovery-evidence",
+                },
+            )
+            self.assertEqual(
+                payload["public_trust_metadata"]["signing_public_key_pem_sha256"],
+                {
+                    name: details["public_key_pem_sha256"]
+                    for name, details in context["signing_roots"].items()
                 },
             )
             self.assertEqual(
@@ -1672,6 +1687,16 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("does not match deployed root-trust inputs", result.stderr)
                 self.assertFalse(output.exists())
+
+    def test_recovery_render_requires_connected_public_key_digests(self):
+        values = valid_render_values()
+        context = valid_recovery_context(values)
+        del context["signing_roots"]["connected-observation-evidence"]["public_key_pem_sha256"]
+        with tempfile.TemporaryDirectory() as directory:
+            result, output = self.render_recovery(directory, values, context)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("public_key_pem_sha256", result.stderr)
+            self.assertFalse(output.exists())
 
     def test_recovery_render_requires_recovery_project_federation_isolation(self):
         values = valid_render_values()

@@ -154,9 +154,10 @@ variable "restore_manifest_digest" {
 variable "public_trust_metadata" {
   description = "Strictly allowlisted public trust references; arbitrary JSON and credential-shaped fields are impossible."
   type = object({
-    schema_version       = number
-    manifest_digests     = map(string)
-    signing_key_versions = map(string)
+    schema_version                = number
+    manifest_digests              = map(string)
+    signing_key_versions          = map(string)
+    signing_public_key_pem_sha256 = map(string)
     signing_windows = map(object({
       active_version_ref      = string
       activation_window_start = string
@@ -172,8 +173,8 @@ variable "public_trust_metadata" {
   })
 
   validation {
-    condition     = var.public_trust_metadata.schema_version == 1
-    error_message = "public_trust_metadata.schema_version must be 1."
+    condition     = var.public_trust_metadata.schema_version == 2
+    error_message = "public_trust_metadata.schema_version must be 2."
   }
 
   validation {
@@ -182,11 +183,25 @@ variable "public_trust_metadata" {
   }
 
   validation {
-    condition = alltrue([
-      for name in values(var.public_trust_metadata.signing_key_versions) :
-      can(regex("^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/keyRings/[A-Za-z0-9_-]+/cryptoKeys/[A-Za-z0-9_-]+/cryptoKeyVersions/[0-9]+$", name))
-    ])
-    error_message = "Signing references must be canonical public CryptoKeyVersion names."
+    condition = (
+      length(var.public_trust_metadata.signing_key_versions) == 6 &&
+      length(var.public_trust_metadata.signing_public_key_pem_sha256) == 6 && alltrue([
+        for name in [
+          "audit-anchor",
+          "bootstrap-handoff",
+          "connected-observation-evidence",
+          "github-config-plan-evidence",
+          "infrastructure-export",
+          "recovery-evidence",
+        ] :
+        contains(keys(var.public_trust_metadata.signing_key_versions), name) &&
+        contains(keys(var.public_trust_metadata.signing_public_key_pem_sha256), name) &&
+        can(regex("^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/keyRings/[A-Za-z0-9_-]+/cryptoKeys/[A-Za-z0-9_-]+/cryptoKeyVersions/[0-9]+$", var.public_trust_metadata.signing_key_versions[name])) &&
+        can(regex("^[0-9a-f]{64}$", var.public_trust_metadata.signing_public_key_pem_sha256[name])) &&
+        length(regexall("[1-9a-f]", var.public_trust_metadata.signing_public_key_pem_sha256[name])) > 0
+      ])
+    )
+    error_message = "Signing trust metadata must contain the exact six canonical public CryptoKeyVersion names and nonzero lowercase PEM SHA-256 digests."
   }
 
   validation {

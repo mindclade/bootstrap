@@ -74,6 +74,7 @@ var (
 	gcpIDPattern                   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 	githubRepoPattern              = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	commitSHAPattern               = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	bareSHA256Pattern              = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	uuidPattern                    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	providerNamePattern            = regexp.MustCompile(`^projects/([0-9]+)/locations/global/workloadIdentityPools/([a-z0-9-]+)/providers/([a-z0-9-]+)$`)
 	keyVersionPattern              = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/locations/([a-z0-9-]+)/keyRings/([A-Za-z0-9_-]+)/cryptoKeys/([A-Za-z0-9_-]+)/cryptoKeyVersions/([1-9][0-9]*)$`)
@@ -147,7 +148,8 @@ type recoveryContext struct {
 		RecoveryPlane recoveryBackendContext `json:"recovery_plane"`
 	} `json:"state_backends"`
 	SigningRoots map[string]struct {
-		PrimaryVersion string `json:"primary_version"`
+		PrimaryVersion     string `json:"primary_version"`
+		PublicKeyPEMSHA256 string `json:"public_key_pem_sha256"`
 	} `json:"signing_roots"`
 }
 
@@ -1950,7 +1952,7 @@ func (c *compiler) validateContracts() {
 	c.expect(signing, "signing-root", "spec", "projectRef")
 	c.expect(signing, "us-central1", "spec", "location")
 	c.expect(signing, "bootstrap-signing", "spec", "keyRing")
-	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence", "github-config-plan-evidence", "infrastructure-export"}, "spec", "keys")
+	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export"}, "spec", "keys")
 	administratorRefs := c.lookup(signing, "spec", "administrators")
 	if items, ok := administratorRefs.([]any); !ok || len(items) != 2 {
 		c.problem("%s.spec.administrators must contain exactly two references", signing)
@@ -1960,10 +1962,11 @@ func (c *compiler) validateContracts() {
 		c.expectListEnvName(signing, expected, index, "spec", "administrators")
 	}
 	signerContracts := map[string][]string{
-		"bootstrap-handoff":           {"BOOTSTRAP_HANDOFF_SIGNER"},
-		"audit-anchor":                {"AUDIT_ANCHOR_SIGNER"},
-		"recovery-evidence":           {"RECOVERY_EVIDENCE_SIGNER"},
-		"github-config-plan-evidence": {"GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER"},
+		"bootstrap-handoff":              {"BOOTSTRAP_HANDOFF_SIGNER"},
+		"audit-anchor":                   {"AUDIT_ANCHOR_SIGNER"},
+		"recovery-evidence":              {"RECOVERY_EVIDENCE_SIGNER"},
+		"connected-observation-evidence": {"CONNECTED_OBSERVATION_EVIDENCE_SIGNER"},
+		"github-config-plan-evidence":    {"GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER"},
 		"infrastructure-export": {
 			"INFRASTRUCTURE_DEVELOPMENT_EXPORT_SIGNER",
 			"INFRASTRUCTURE_STAGING_EXPORT_SIGNER",
@@ -2670,6 +2673,7 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 		c.problem("recovery context signing_roots keys must equal %v", expectedSigningKeys)
 	}
 	signingVersions := map[string]string{}
+	signingPublicKeyDigests := map[string]string{}
 	signingWindows := map[string]any{}
 	recoverySigningWindowKeys := map[string]struct{}{
 		"audit-anchor":      {},
@@ -2686,6 +2690,11 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 			c.problem("recovery context signing root %s does not match the compiled signing root", name)
 		}
 		signingVersions[name] = version
+		publicKeyDigest := context.SigningRoots[name].PublicKeyPEMSHA256
+		if !bareSHA256Pattern.MatchString(publicKeyDigest) || publicKeyDigest == strings.Repeat("0", 64) {
+			c.problem("recovery context signing root %s public_key_pem_sha256 must be a nonzero lowercase digest supplied by the deployed root-trust output", name)
+		}
+		signingPublicKeyDigests[name] = publicKeyDigest
 		if _, published := recoverySigningWindowKeys[name]; !published {
 			continue
 		}
@@ -2807,13 +2816,14 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 		"minimum_retained_state_generations": c.intAt(recovery, "spec", "exports", "minimumRetainedStateGenerations"),
 		"restore_manifest_digest":            restoreDigest,
 		"public_trust_metadata": map[string]any{
-			"schema_version":       1,
-			"manifest_digests":     manifestDigests,
-			"signing_key_versions": signingVersions,
-			"signing_windows":      signingWindows,
-			"federation_providers": contextProviders,
-			"federation_audiences": federationAudiences,
-			"state_backends":       stateBackendMetadata,
+			"schema_version":                2,
+			"manifest_digests":              manifestDigests,
+			"signing_key_versions":          signingVersions,
+			"signing_public_key_pem_sha256": signingPublicKeyDigests,
+			"signing_windows":               signingWindows,
+			"federation_providers":          contextProviders,
+			"federation_audiences":          federationAudiences,
+			"state_backends":                stateBackendMetadata,
 		},
 	}
 }

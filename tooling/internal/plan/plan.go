@@ -231,8 +231,8 @@ var exactResourceAddressKeys = map[string]map[string]bool{
 	"module.audit_root.google_project_iam_custom_role.plan_read":                                 stringSet("primary", "recovery"),
 	"module.audit_root.google_project_iam_member.plan_read":                                      stringSet("primary", "recovery"),
 	"module.signing_root.google_project_service.required":                                        stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "serviceusage.googleapis.com"),
-	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
-	"module.signing_root.data.google_kms_crypto_key_version.active":                              stringSet("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
+	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
+	"module.signing_root.data.google_kms_crypto_key_version.active":                              stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
 	"module.recovery_exports.google_kms_crypto_key.recovery":                                     stringSet("exports", "evidence"),
 	"module.recovery_exports.google_kms_crypto_key_iam_member.storage":                           stringSet("exports", "evidence"),
 	"module.recovery_exports.google_storage_bucket.recovery":                                     stringSet("exports", "evidence"),
@@ -570,7 +570,7 @@ var recoveryStateExportRoleContracts = map[string]replicationRoleContract{
 
 var recoveryStateExportKeys = []string{"root-trust", "recovery-plane"}
 
-var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"}
+var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"}
 
 var recoverySigningWindowNames = []string{"audit-anchor", "bootstrap-handoff", "recovery-evidence"}
 
@@ -1928,11 +1928,11 @@ func validateSigningPrincipalCoverage(allResources, resources []resourceChange, 
 		recoveryIdentity = recoveryIdentity || bootstrapRecoveryPrincipalPattern.MatchString(member)
 	}
 	valid := len(byKey) == 4 && len(byKey["audit-anchor"]) == 2 && len(byKey["bootstrap-handoff"]) == 2 &&
-		len(byKey["github-config-plan-evidence"]) == 1 && len(byKey["infrastructure-export"]) == 0 &&
+		len(byKey["connected-observation-evidence"]) == 0 && len(byKey["github-config-plan-evidence"]) == 1 && len(byKey["infrastructure-export"]) == 0 &&
 		len(byKey["recovery-evidence"]) == 2 && buildkiteMember != "" && byKey["audit-anchor"][buildkiteMember] &&
 		byKey["bootstrap-handoff"][buildkiteMember] && recoveryIdentity
 	if !valid {
-		*violations = append(*violations, "signer instances must exactly cover approved pipeline/recovery/governance identities while infrastructure-export remains IAM-disabled pending qualification")
+		*violations = append(*violations, "signer instances must exactly cover approved pipeline/recovery/governance identities while connected-observation-evidence and infrastructure-export remain IAM-disabled pending qualification")
 	}
 }
 
@@ -2632,7 +2632,7 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 			expected[principals.buildkite] = true
 		case "recovery-evidence":
 			expected[principals.recovery] = true
-		case "infrastructure-export":
+		case "connected-observation-evidence", "infrastructure-export":
 			// The source declares its future signers, while this key stays
 			// IAM-disabled until connected infrastructure qualification.
 			expected = map[string]bool{}
@@ -6259,9 +6259,9 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 		return
 	}
 	valid := exactObjectKeys(metadata, []string{
-		"schema_version", "manifest_digests", "signing_key_versions", "signing_windows",
+		"schema_version", "manifest_digests", "signing_key_versions", "signing_public_key_pem_sha256", "signing_windows",
 		"federation_providers", "federation_audiences", "state_backends",
-	}) && metadata["schema_version"] == float64(1)
+	}) && metadata["schema_version"] == float64(2)
 
 	manifestPaths := []string{
 		"manifests/audit-roots.yaml",
@@ -6280,11 +6280,17 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 	}
 
 	versions, versionsOK := metadata["signing_key_versions"].(map[string]any)
+	publicKeyDigests, publicKeyDigestsOK := metadata["signing_public_key_pem_sha256"].(map[string]any)
 	windows, windowsOK := metadata["signing_windows"].(map[string]any)
-	valid = valid && versionsOK && windowsOK && exactObjectKeys(versions, signingKeyNames) && exactObjectKeys(windows, recoverySigningWindowNames)
+	valid = valid && versionsOK && publicKeyDigestsOK && windowsOK && exactObjectKeys(versions, signingKeyNames) &&
+		exactObjectKeys(publicKeyDigests, signingKeyNames) && exactObjectKeys(windows, recoverySigningWindowNames)
 	signingProject := ""
 	for _, key := range signingKeyNames {
 		version, _ := versions[key].(string)
+		publicKeyDigest, _ := publicKeyDigests[key].(string)
+		if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(publicKeyDigest) || publicKeyDigest == strings.Repeat("0", 64) {
+			valid = false
+		}
 		parts := strings.Split(version, "/")
 		if len(parts) != 10 || parts[0] != "projects" || !googleProjectIDPattern.MatchString(parts[1]) ||
 			parts[2] != "locations" || parts[3] != "us-central1" || parts[4] != "keyRings" || parts[5] != "bootstrap-signing" ||

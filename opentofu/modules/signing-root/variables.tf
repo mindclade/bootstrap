@@ -69,14 +69,15 @@ variable "keys" {
   }))
 
   validation {
-    condition = length(var.keys) == 5 && length(setsubtract(toset(keys(var.keys)), toset([
+    condition = length(var.keys) == 6 && length(setsubtract(toset(keys(var.keys)), toset([
       "audit-anchor",
       "bootstrap-handoff",
+      "connected-observation-evidence",
       "github-config-plan-evidence",
       "infrastructure-export",
       "recovery-evidence",
     ]))) == 0
-    error_message = "keys must define exactly audit-anchor, bootstrap-handoff, github-config-plan-evidence, infrastructure-export, and recovery-evidence."
+    error_message = "keys must define exactly audit-anchor, bootstrap-handoff, connected-observation-evidence, github-config-plan-evidence, infrastructure-export, and recovery-evidence."
   }
 
   validation {
@@ -123,8 +124,11 @@ variable "disabled_signing_keys" {
   default     = []
 
   validation {
-    condition     = var.disabled_signing_keys == toset(["infrastructure-export"])
-    error_message = "Only infrastructure-export may remain source-complete with signer IAM disabled pending connected qualification."
+    condition = var.disabled_signing_keys == toset([
+      "connected-observation-evidence",
+      "infrastructure-export",
+    ])
+    error_message = "Only connected-observation-evidence and infrastructure-export may remain source-complete with signer IAM disabled pending connected qualification."
   }
 }
 

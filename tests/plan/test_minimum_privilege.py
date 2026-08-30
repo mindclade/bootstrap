@@ -1,6 +1,7 @@
 """Adversarial tests for Ring-0 OpenTofu plan classification."""
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -292,6 +293,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             for key in (
                 "audit-anchor",
                 "bootstrap-handoff",
+                "connected-observation-evidence",
                 "github-config-plan-evidence",
                 "infrastructure-export",
                 "recovery-evidence",
@@ -311,7 +313,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
         }
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "manifest_digests": {
                 path: "sha256:" + "a" * 64
                 for path in (
@@ -325,6 +327,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 )
             },
             "signing_key_versions": signing_versions,
+            "signing_public_key_pem_sha256": {
+                key: hashlib.sha256(
+                    ACTIVE_SIGNING_PUBLIC_KEY_PEM.encode("utf-8")
+                ).hexdigest()
+                for key in signing_versions
+            },
             "signing_windows": signing_windows,
             "federation_providers": {
                 "github-plan": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-github-plan/providers/github-actions-plan",
@@ -1111,6 +1119,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         for key_name in (
             "audit-anchor",
             "bootstrap-handoff",
+            "connected-observation-evidence",
             "github-config-plan-evidence",
             "infrastructure-export",
             "recovery-evidence",
@@ -1139,7 +1148,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             }
             resources.append(version)
 
-            if key_name == "infrastructure-export":
+            if key_name in {
+                "connected-observation-evidence",
+                "infrastructure-export",
+            }:
                 continue
 
             principal = principals[key_name]
@@ -1285,6 +1297,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             for key_name in (
                 "audit-anchor",
                 "bootstrap-handoff",
+                "connected-observation-evidence",
                 "github-config-plan-evidence",
                 "infrastructure-export",
                 "recovery-evidence",
@@ -1322,6 +1335,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                             for key in (
                                 "audit-anchor",
                                 "bootstrap-handoff",
+                                "connected-observation-evidence",
                                 "github-config-plan-evidence",
                                 "infrastructure-export",
                                 "recovery-evidence",
@@ -3449,9 +3463,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_versions_and_time_scoped_signers_are_exact(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
             resources.extend([self.signing_crypto_key(key), self.signing_version(key)])
-            if key != "infrastructure-export":
+            if key not in {"connected-observation-evidence", "infrastructure-export"}:
                 resources.append(self.signing_binding(key))
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -3748,14 +3762,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_allows_prestage_then_concrete_activation(self):
         prestage_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            prestage_resources.extend(
-                [
-                    self.signing_version(key, actions=["no-op"]),
-                    self.unknown_signing_version(key),
-                    self.signing_binding(key, actions=["no-op"]),
-                ]
-            )
+        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+            prestage_resources.extend([
+                self.signing_version(key, actions=["no-op"]),
+                self.unknown_signing_version(key),
+            ])
+            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+                prestage_resources.append(self.signing_binding(key, actions=["no-op"]))
         prestage = {
             "format_version": "1.2",
             "terraform_version": "1.12.6",
@@ -3766,26 +3779,25 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         activation_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            activation_resources.extend(
-                [
-                    self.signing_version(key, actions=["no-op"], state="DISABLED"),
-                    self.signing_version(
-                        key,
-                        actions=["no-op"],
-                        version_ref="v20261126",
-                        version_number="2",
-                    ),
-                    self.signing_binding(
-                        key,
-                        version_ref="v20261126",
-                        version_number="2",
-                        activation_window_start="2026-11-26T00:00:00Z",
-                        rotation_deadline="2027-02-24T00:00:00Z",
-                        actions=["update"],
-                    ),
-                ]
-            )
+        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+            activation_resources.extend([
+                self.signing_version(key, actions=["no-op"], state="DISABLED"),
+                self.signing_version(
+                    key,
+                    actions=["no-op"],
+                    version_ref="v20261126",
+                    version_number="2",
+                ),
+            ])
+            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+                activation_resources.append(self.signing_binding(
+                    key,
+                    version_ref="v20261126",
+                    version_number="2",
+                    activation_window_start="2026-11-26T00:00:00Z",
+                    rotation_deadline="2027-02-24T00:00:00Z",
+                    actions=["update"],
+                ))
         activation = {
             "format_version": "1.2",
             "terraform_version": "1.12.6",
@@ -3797,14 +3809,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_rejects_undeclared_gap_and_window_mutation(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            resources.extend(
-                [
-                    self.signing_version(key, actions=["no-op"]),
-                    self.unknown_signing_version(key),
-                    self.signing_binding(key, actions=["no-op"]),
-                ]
-            )
+        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+            resources.extend([
+                self.signing_version(key, actions=["no-op"]),
+                self.unknown_signing_version(key),
+            ])
+            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+                resources.append(self.signing_binding(key, actions=["no-op"]))
         base = {
             "format_version": "1.2",
             "terraform_version": "1.12.6",

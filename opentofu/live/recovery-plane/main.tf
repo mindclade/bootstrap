@@ -18,9 +18,10 @@ variable "recovery" {
     }))
     restore_manifest_digest = string
     public_trust_metadata = object({
-      schema_version       = number
-      manifest_digests     = map(string)
-      signing_key_versions = map(string)
+      schema_version                = number
+      manifest_digests              = map(string)
+      signing_key_versions          = map(string)
+      signing_public_key_pem_sha256 = map(string)
       signing_windows = map(object({
         active_version_ref      = string
         activation_window_start = string

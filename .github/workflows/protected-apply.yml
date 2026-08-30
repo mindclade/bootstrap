@@ -302,7 +302,10 @@ jobs:
                   }
                 },
                 state_backends: $state[0],
-                signing_roots: ($signing[0] | with_entries(.value = {primary_version: .value.primary_version}))
+                signing_roots: ($signing[0] | with_entries(.value = {
+                  primary_version: .value.primary_version,
+                  public_key_pem_sha256: .value.public_key_pem_sha256
+                }))
               }' >"${context_path}"
             chmod 0600 "${federation_output}" "${signing_output}" "${state_output}" "${context_path}"
             render_arguments+=(--context "${context_path}")
