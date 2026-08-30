@@ -447,7 +447,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["files"], 96)
+        self.assertEqual(payload["files"], 98)
         self.assertEqual(payload["manifests"], 7)
 
     @unittest.skipIf(
@@ -846,7 +846,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_source_qualification_installs_exact_hash_verified_just(self):
         checksum = "b0ef600f0df20d5ae91ae931627c499fc52b477ffe5f5ea7b7b3ec616b16c778"
-        for name in ("pull-request.yml", "recovery-verification.yml"):
+        for name in ("recovery-verification.yml",):
             workflow = (
                 self.repository_root / ".github" / "workflows" / name
             ).read_text(encoding="utf-8")
@@ -855,6 +855,20 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertIn("just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz", workflow)
             self.assertIn("sha256sum --check --strict", workflow)
             self.assertIn('= "just ${JUST_VERSION}"', workflow)
+
+    def test_pull_request_qualification_uses_the_locked_nix_contract(self):
+        workflow = (
+            self.repository_root / ".github" / "workflows" / "pull-request.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25",
+            workflow,
+        )
+        self.assertIn("nix build --no-update-lock-file .#toolchain", workflow)
+        self.assertIn("nix flake check --no-update-lock-file", workflow)
+        self.assertIn(
+            "nix develop --no-update-lock-file .#ci --command just ci", workflow
+        )
 
     def test_workflow_security_contract_fails_closed(self):
         cases = (

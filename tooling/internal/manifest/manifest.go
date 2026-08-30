@@ -37,7 +37,7 @@ var manifestSchemas = map[string]string{
 var expectedFiles = []string{
 	".editorconfig", ".github/CODEOWNERS", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
-	".gitignore", "BUILD.bazel", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "component.yaml", "justfile",
+	".gitignore", "BUILD.bazel", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "component.yaml", "flake.lock", "flake.nix", "justfile",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",
 	"manifests/recovery-policy.yaml", "manifests/signing-roots.yaml", "manifests/state-backends.yaml", "manifests/trust-anchors.yaml",
 	"opentofu/live/recovery-plane/backend.tf", "opentofu/live/recovery-plane/main.tf", "opentofu/live/recovery-plane/outputs.tf",
@@ -482,10 +482,7 @@ var workflowContracts = map[string]workflowContract{
 		environments: map[string]string{},
 		actions: []string{
 			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-			"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-			"actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
-			"bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86",
-			"opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4",
+			"DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25",
 		},
 	},
 	".github/workflows/protected-apply.yml": {

@@ -32,7 +32,20 @@ The workforce pool and its exported administrator-group `principalSet` are authe
 
 ## Local source checks
 
-Use the pinned Go, Python, Bazel, OpenTofu, and Conftest versions encoded by the repository and CI:
+The repository-local `flake.nix` and `flake.lock` are the sole system-toolchain
+authority for supported `aarch64-darwin` and `x86_64-linux` hosts. The flake
+exposes the reviewed toolchain package, identical default/CI shell closures,
+formatter, and toolchain/source checks while preserving Go modules, OpenTofu
+provider locks, and Bazel as their native dependency authorities:
+
+```bash
+nix build --no-update-lock-file .#toolchain
+nix flake check --no-update-lock-file
+nix develop --no-update-lock-file .#ci --command just ci
+```
+
+The canonical Nix shell supplies the pinned Go, Python, Bazelisk, OpenTofu,
+Google Cloud, OPA, and Conftest tools encoded by the repository and CI:
 
 ```bash
 just validate
