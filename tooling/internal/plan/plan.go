@@ -3597,7 +3597,7 @@ func validateCIEvidenceProviderClaims(resource resourceChange, after map[string]
 	case "writer":
 		expectedMapping["attribute.job_workflow_ref"] = "assertion.job_workflow_ref"
 		expectedMapping["attribute.job_workflow_sha"] = "assertion.job_workflow_sha"
-		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id in \['1350980188', '1350986053', '1350990078', '1350991612', '1350991963', '1350992171'\] && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.job_workflow_ref == 'mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})' && assertion\.job_workflow_sha == '([0-9a-f]{40})' && \(\(assertion\.event_name == 'push' && assertion\.ref == 'refs/heads/main'\) \|\| \(assertion\.event_name == 'release' && assertion\.ref\.startsWith\('refs/tags/v'\)\)\)$`)
+		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id in \['1350980188', '1350986053', '1350991612', '1350991963', '1350992171', '1351193819'\] && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.job_workflow_ref == 'mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})' && assertion\.job_workflow_sha == '([0-9a-f]{40})' && \(\(assertion\.event_name == 'push' && assertion\.ref == 'refs/heads/main'\) \|\| \(assertion\.event_name == 'release' && assertion\.ref\.startsWith\('refs/tags/v'\)\)\)$`)
 		matches := pattern.FindStringSubmatch(condition)
 		validCondition = len(matches) == 3 && matches[1] == matches[2]
 	case "verifier":

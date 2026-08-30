@@ -1382,8 +1382,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             'ci_evidence["archive"]'
         )
         repository_ids = (
-            "['1350980188', '1350986053', '1350990078', "
-            "'1350991612', '1350991963', '1350992171']"
+            "['1350980188', '1350986053', '1350991612', "
+            "'1350991963', '1350992171', '1351193819']"
         )
         workflow_sha = "a" * 40
         recovery_sha = "b" * 40

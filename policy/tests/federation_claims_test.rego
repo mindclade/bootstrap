@@ -23,7 +23,7 @@ valid_ci_evidence := {
 		"github-config": {"literal": "1350986053"},
 		"gitops": {"literal": "1350991963"},
 		"infrastructure-live": {"literal": "1350992171"},
-		"mindclade": {"literal": "1350990078"},
+		"mindclade": {"literal": "1351193819"},
 	},
 	"writer": {
 		"providerId": "writer",

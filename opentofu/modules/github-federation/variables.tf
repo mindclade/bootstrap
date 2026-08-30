@@ -280,7 +280,7 @@ variable "ci_evidence" {
       github-config       = "1350986053"
       gitops              = "1350991963"
       infrastructure-live = "1350992171"
-      mindclade           = "1350990078"
+      mindclade           = "1351193819"
     })
     error_message = "CI evidence writer repository IDs must equal the exact six-repository Mindclade estate."
   }

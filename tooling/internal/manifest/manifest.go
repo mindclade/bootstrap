@@ -1900,7 +1900,7 @@ func (c *compiler) validateContracts() {
 		"github-config":       "1350986053",
 		"gitops":              "1350991963",
 		"infrastructure-live": "1350992171",
-		"mindclade":           "1350990078",
+		"mindclade":           "1351193819",
 	}
 	c.expectKeys(federation, sortedKeys(ciEvidenceRepositoryIDs), append(ciEvidenceBase, "repositoryIds")...)
 	for repository, repositoryID := range ciEvidenceRepositoryIDs {
