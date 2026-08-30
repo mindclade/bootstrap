@@ -1,0 +1,39 @@
+apiVersion: mindclade.io/v1alpha1
+kind: Component
+metadata:
+  name: bootstrap
+  description: Source of truth for state, audit, federation, signing, break-glass, and recovery foundations.
+  annotations:
+    github.com/project-slug: mindclade/bootstrap
+    mindclade.dev/security-owner: security
+    mindclade.dev/authority-boundary: ring-0-only
+spec:
+  type: bootstrap-control-plane
+  lifecycle: production
+  maturity: production
+  owner: platform-operations
+  security_reviewers:
+    - security
+  repository_class: infrastructure-source
+  data_classification: restricted
+  production_authority: true
+  dependencies: []
+  provides:
+    - ring0-state-backends-v1
+    - ring0-federation-v1
+    - ring0-recovery-evidence-v1
+  release:
+    strategy: protected-saved-plan
+    artifact: source-commit
+    immutable: true
+    evidence:
+      - source-qualification
+      - plan-digest
+      - protected-environment-approval
+      - recovery-verification
+  activation:
+    source_ready:
+      description: Source, metadata, policy, tests, and required reviews are complete; no external mutation is implied.
+    connected:
+      description: GitHub and GCP controls have been independently verified against the exact qualified commit.
+  license: Mindclade Proprietary License

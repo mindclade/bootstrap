@@ -1,0 +1,159 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: IdentityFederation
+metadata:
+  name: bootstrap-identity
+spec:
+  workforce:
+    projectRef: identity-root
+    location: global
+    poolId: mindclade-workforce
+    providerId: primary-idp
+    protocol: oidc
+    issuerUri:
+      valueFrom:
+        env: WORKFORCE_OIDC_ISSUER_URI
+    clientId:
+      valueFrom:
+        env: WORKFORCE_OIDC_CLIENT_ID
+    clientSecret:
+      valueFrom:
+        env: WORKFORCE_OIDC_CLIENT_SECRET
+    administratorGroup:
+      valueFrom:
+        env: WORKFORCE_ADMIN_GROUP
+    attributeMapping:
+      subject: assertion.sub
+      displayName: assertion.name
+      groups: assertion.groups
+  workloadIdentityProviders:
+    github:
+      platform: github
+      projectRef: identity-root
+      poolId: bootstrap-github
+      providerId: github-actions
+      issuerUri:
+        valueFrom:
+          env: GITHUB_OIDC_ISSUER_URI
+      allowedAudience:
+        valueFrom:
+          env: GITHUB_OIDC_AUDIENCE
+      subjectClaim: assertion.sub
+      requiredClaims:
+        repository_owner_id:
+          valueFrom:
+            env: GITHUB_REPOSITORY_OWNER_ID
+        repository_id:
+          valueFrom:
+            env: GITHUB_REPOSITORY_ID
+        ref:
+          literal: refs/heads/main
+        workflow_ref:
+          valueFrom:
+            env: GITHUB_APPLY_WORKFLOW_REF
+      serviceAccounts:
+        plan:
+          projectRef: state-root
+          accountId: bootstrap-plan
+          roles:
+            - custom/bootstrapAuditPlanRead
+            - custom/bootstrapOrganizationPlanRead
+            - custom/bootstrapRecoveryPlanObjectRead
+            - custom/bootstrapRecoveryPlanRead
+            - custom/bootstrapStatePlanLock
+            - roles/browser
+            - roles/cloudkms.viewer
+            - roles/iam.roleViewer
+            - roles/iam.securityReviewer
+            - roles/iam.serviceAccountViewer
+            - roles/iam.workforcePoolViewer
+            - roles/privilegedaccessmanager.viewer
+            - roles/serviceusage.serviceUsageViewer
+            - roles/storage.legacyBucketReader
+            - roles/storage.objectViewer
+            - roles/storagetransfer.viewer
+        apply:
+          projectRef: state-root
+          accountId: bootstrap-apply
+          roles:
+            - custom/bootstrapOrganizationIamApply
+            - roles/cloudkms.admin
+            - roles/iam.organizationRoleAdmin
+            - roles/iam.roleAdmin
+            - roles/iam.serviceAccountAdmin
+            - roles/iam.serviceAccountUser
+            - roles/iam.workforcePoolAdmin
+            - roles/logging.configWriter
+            - roles/privilegedaccessmanager.admin
+            - roles/resourcemanager.projectIamAdmin
+            - roles/serviceusage.serviceUsageAdmin
+            - roles/storage.admin
+            - roles/storage.objectAdmin
+            - roles/storage.objectCreator
+            - roles/storagetransfer.user
+        recovery:
+          projectRef: recovery-root
+          accountId: bootstrap-recovery
+          roles:
+            - custom/bootstrapRecoverySigningMetadata
+            - custom/bootstrapRecoverySinkRead
+            - roles/cloudkms.signerVerifier
+            - roles/storage.legacyBucketReader
+            - roles/storage.objectViewer
+    buildkite:
+      platform: buildkite
+      projectRef: identity-root
+      poolId: bootstrap-buildkite
+      providerId: buildkite
+      issuerUri:
+        valueFrom:
+          env: BUILDKITE_OIDC_ISSUER_URI
+      allowedAudience:
+        valueFrom:
+          env: BUILDKITE_OIDC_AUDIENCE
+      subjectClaim: assertion.sub
+      requiredClaims:
+        organization_slug:
+          valueFrom:
+            env: BUILDKITE_ORGANIZATION_SLUG
+        pipeline_slug:
+          valueFrom:
+            env: BUILDKITE_PIPELINE_SLUG
+        pipeline_id:
+          valueFrom:
+            env: BUILDKITE_PIPELINE_ID
+        build_branch:
+          literal: main
+        step_key:
+          literal: bootstrap-ring0-signing
+      serviceAccounts:
+        bootstrap:
+          projectRef: state-root
+          accountId: buildkite-bootstrap
+          roles:
+            - roles/cloudkms.signerVerifier
+    gitops:
+      platform: gitops
+      projectRef: identity-root
+      poolId: bootstrap-gitops
+      providerId: gitops
+      issuerUri:
+        valueFrom:
+          env: GITOPS_OIDC_ISSUER_URI
+      allowedAudience:
+        valueFrom:
+          env: GITOPS_OIDC_AUDIENCE
+      subjectClaim: assertion.sub
+      requiredClaims:
+        repository:
+          valueFrom:
+            env: GITOPS_REPOSITORY
+        ref:
+          literal: refs/heads/main
+        subject:
+          valueFrom:
+            env: GITOPS_IMMUTABLE_SUBJECT
+      serviceAccounts:
+        bootstrap:
+          projectRef: recovery-root
+          accountId: gitops-bootstrap
+          roles: []

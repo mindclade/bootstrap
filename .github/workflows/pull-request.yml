@@ -1,0 +1,90 @@
+name: pull-request
+
+"on":
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.6"
+  JUST_VERSION: "1.55.1"
+  PYTHON_VERSION: "3.14.7"
+  TOFU_VERSION: "1.12.6"
+  USE_BAZEL_VERSION: "9.1.1"
+
+jobs:
+  required:
+    name: required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Bazel without shared caches
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.29.0
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+          cache: false
+          checksums: |
+            5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8
+
+      - name: Install the exact reviewed just binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/just.tar.gz"
+          install_dir="${RUNNER_TEMP}/just-bin"
+          mkdir -m 0700 "${install_dir}"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            --output "${archive}"
+          printf '%s  %s\n' \
+            'b0ef600f0df20d5ae91ae931627c499fc52b477ffe5f5ea7b7b3ec616b16c778' \
+            "${archive}" \
+            | sha256sum --check --strict
+          tar --extract --gzip --file "${archive}" --directory "${install_dir}" just
+          chmod 0755 "${install_dir}/just"
+          test "$("${install_dir}/just" --version)" = "just ${JUST_VERSION}"
+          printf '%s\n' "${install_dir}" >>"${GITHUB_PATH}"
+
+      - name: Install pinned validation tools
+        run: |
+          go install github.com/open-policy-agent/conftest@v0.69.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Validate repository contracts
+        run: just fmt-check validate-manifests validate-policy validate-tofu lint-ci
+
+      - name: Run all test suites
+        run: just test

@@ -1,0 +1,40 @@
+# Bazel outputs and generated lock state
+/bazel-*
+/MODULE.bazel.lock
+
+# Go and Python build products
+/tooling/bootstrapctl
+__pycache__/
+*.py[cod]
+
+# OpenTofu working data, state, plans, and generated dependency locks
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.json
+*.evidence.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Runtime-only backend, variables, and credentials
+*.backend.hcl
+*.tfbackend
+*.auto.tfvars
+*.auto.tfvars.json
+*.tfvars
+*.tfvars.json
+gha-creds-*.json
+application_default_credentials.json
+
+# Local editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

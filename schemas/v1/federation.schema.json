@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.mindclade.io/bootstrap/v1/federation.schema.json",
+  "title": "Mindclade bootstrap identity federation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
+    "kind": {"const": "IdentityFederation"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workforce", "workloadIdentityProviders"],
+      "properties": {
+        "workforce": {"$ref": "#/$defs/workforce"},
+        "workloadIdentityProviders": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["github", "buildkite", "gitops"],
+          "properties": {
+            "github": {
+              "allOf": [
+                {"$ref": "#/$defs/provider"},
+                {
+                  "properties": {
+                    "platform": {"const": "github"},
+                    "requiredClaims": {
+                      "required": ["repository_owner_id", "repository_id", "ref", "workflow_ref"],
+                      "minProperties": 4,
+                      "maxProperties": 4
+                    },
+                    "serviceAccounts": {
+                      "required": ["plan", "apply", "recovery"],
+                      "minProperties": 3,
+                      "maxProperties": 3
+                    }
+                  }
+                }
+              ]
+            },
+            "buildkite": {
+              "allOf": [
+                {"$ref": "#/$defs/provider"},
+                {
+                  "properties": {
+                    "platform": {"const": "buildkite"},
+                    "requiredClaims": {
+                      "required": ["organization_slug", "pipeline_slug", "pipeline_id", "build_branch", "step_key"],
+                      "minProperties": 5,
+                      "maxProperties": 5
+                    },
+                    "serviceAccounts": {
+                      "required": ["bootstrap"],
+                      "minProperties": 1,
+                      "maxProperties": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "gitops": {
+              "allOf": [
+                {"$ref": "#/$defs/provider"},
+                {
+                  "properties": {
+                    "platform": {"const": "gitops"},
+                    "requiredClaims": {
+                      "required": ["repository", "ref", "subject"],
+                      "minProperties": 3,
+                      "maxProperties": 3
+                    },
+                    "serviceAccounts": {
+                      "required": ["bootstrap"],
+                      "minProperties": 1,
+                      "maxProperties": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+    },
+    "envRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valueFrom"],
+      "properties": {
+        "valueFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["env"],
+          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+        }
+      }
+    },
+    "expectedValue": {
+      "oneOf": [
+        {"$ref": "#/$defs/envRef"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["literal"],
+          "properties": {"literal": {"type": "string", "minLength": 1, "pattern": "^[^*?]+$"}}
+        }
+      ]
+    },
+    "workforce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectRef", "location", "poolId", "providerId", "protocol", "issuerUri", "clientId", "clientSecret", "administratorGroup", "attributeMapping"],
+      "properties": {
+        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "location": {"const": "global"},
+        "poolId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "providerId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "protocol": {"enum": ["oidc", "saml"]},
+        "issuerUri": {"$ref": "#/$defs/envRef"},
+        "clientId": {"$ref": "#/$defs/envRef"},
+        "clientSecret": {"$ref": "#/$defs/envRef"},
+        "administratorGroup": {"$ref": "#/$defs/envRef"},
+        "attributeMapping": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "displayName", "groups"],
+          "properties": {
+            "subject": {"const": "assertion.sub"},
+            "displayName": {"const": "assertion.name"},
+            "groups": {"const": "assertion.groups"}
+          }
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectRef", "accountId", "roles"],
+      "properties": {
+        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "accountId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"},
+        "roles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(roles/[A-Za-z0-9_.]+|custom/[A-Za-z0-9_.]+)$",
+            "not": {"enum": ["roles/owner", "roles/editor", "roles/viewer"]}
+          }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "projectRef", "poolId", "providerId", "issuerUri", "allowedAudience", "subjectClaim", "requiredClaims", "serviceAccounts"],
+      "properties": {
+        "platform": {"enum": ["github", "buildkite", "gitops"]},
+        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "poolId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "providerId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "issuerUri": {"$ref": "#/$defs/envRef"},
+        "allowedAudience": {"$ref": "#/$defs/envRef"},
+        "subjectClaim": {"const": "assertion.sub"},
+        "requiredClaims": {
+          "type": "object",
+          "minProperties": 2,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{1,62}$"},
+          "additionalProperties": {"$ref": "#/$defs/expectedValue"}
+        },
+        "serviceAccounts": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
+          "additionalProperties": {"$ref": "#/$defs/serviceAccount"}
+        }
+      }
+    }
+  }
+}

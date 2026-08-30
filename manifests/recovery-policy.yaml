@@ -1,0 +1,44 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: RecoveryPolicy
+metadata:
+  name: bootstrap-recovery
+spec:
+  primaryRegion: us-central1
+  recoveryRegion: us-east4
+  rootTrustBackendRef: root-trust
+  recoveryBackendRef: recovery-plane
+  signingRootRef: recovery-evidence
+  restoreManifestPath: recovery/restore-manifest.yaml
+  objectives:
+    recoveryPointHours: 24
+    recoveryTimeHours: 8
+  exports:
+    minimumRetainedStateGenerations: 3
+    encryptionKeyName:
+      valueFrom:
+        env: RECOVERY_EXPORT_KMS_KEY
+    includePublicTrustMetadata: true
+    includePrivateKeyMaterial: false
+  evidence:
+    maximumAgeHours: 2190
+    signatureAlgorithm: EC_SIGN_P256_SHA256
+    requireManifestDigest: true
+  drills:
+    cadence: quarterly
+    offlineByDefault: true
+    connectedMode: read-only
+    evidenceRetentionDays: 2555
+  isolation:
+    required: true
+    denyPrimaryPlaneDependencies: true
+    networkIsolationRequired: true
+    recoveryAdministrator:
+      valueFrom:
+        env: RECOVERY_ADMIN_GROUP
+  independentContacts:
+    primary:
+      valueFrom:
+        env: RECOVERY_CONTACT_1
+    secondary:
+      valueFrom:
+        env: RECOVERY_CONTACT_2

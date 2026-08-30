@@ -1,0 +1,726 @@
+name: recovery-verification
+
+"on":
+  schedule:
+    - cron: "17 7 1 1,4,7,10 *"
+  workflow_dispatch:
+    inputs:
+      connected:
+        description: Also perform federated, read-only recovery-plane checks and KMS-sign the evidence
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-ring0-state-mutation-observation
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26.6"
+  JUST_VERSION: "1.55.1"
+  PYTHON_VERSION: "3.14.7"
+  TOFU_VERSION: "1.12.6"
+  USE_BAZEL_VERSION: "9.1.1"
+
+jobs:
+  offline:
+    name: isolated-source-simulation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out recovery source without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require the current protected-main source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${GITHUB_SHA}"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Bazel without shared caches
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.29.0
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+          cache: false
+          checksums: |
+            5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8
+
+      - name: Install the exact reviewed just binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/just.tar.gz"
+          install_dir="${RUNNER_TEMP}/just-bin"
+          mkdir -m 0700 "${install_dir}"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            --output "${archive}"
+          printf '%s  %s\n' \
+            'b0ef600f0df20d5ae91ae931627c499fc52b477ffe5f5ea7b7b3ec616b16c778' \
+            "${archive}" \
+            | sha256sum --check --strict
+          tar --extract --gzip --file "${archive}" --directory "${install_dir}" just
+          chmod 0755 "${install_dir}/just"
+          test "$("${install_dir}/just" --version)" = "just ${JUST_VERSION}"
+          printf '%s\n' "${install_dir}" >>"${GITHUB_PATH}"
+
+      - name: Install pinned validation tools
+        run: |
+          go install github.com/open-policy-agent/conftest@v0.69.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Qualify source and simulate the isolated recovery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          just validate
+          just recovery-verify
+
+      - name: Render redacted offline evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="${RUNNER_TEMP}/offline-source-simulation.json"
+          restore_digest="$(sha256sum recovery/restore-manifest.yaml | cut -d ' ' -f1)"
+          source_tree="$(git rev-parse 'HEAD^{tree}')"
+          jq -n \
+            --arg schemaVersion "bootstrap.mindclade.dev/recovery-evidence/v1" \
+            --arg mode "offline-source-simulation" \
+            --arg result "source-qualified" \
+            --arg sourceSha "${GITHUB_SHA}" \
+            --arg sourceTree "${source_tree}" \
+            --arg restoreManifestSha256 "${restore_digest}" \
+            --arg runId "${GITHUB_RUN_ID}" \
+            --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion: $schemaVersion, mode: $mode, result: $result, sourceSha: $sourceSha, sourceTree: $sourceTree, restoreManifestSha256: $restoreManifestSha256, runId: $runId, runAttempt: $runAttempt, verifiedAt: $verifiedAt}' \
+            >"${evidence}"
+
+      - name: Sign the offline evidence with GitHub artifact attestation
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/offline-source-simulation.json
+
+      - name: Retain only the redacted offline evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: offline-source-simulation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/offline-source-simulation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  connected:
+    name: connected-read-only-verification
+    if: github.event_name == 'workflow_dispatch' && inputs.connected
+    needs: offline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: recovery-verification
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ORGANIZATION_ID: ${{ vars.GCP_ORGANIZATION_ID }}
+      AUDIT_PROJECT_ID: ${{ vars.GCP_AUDIT_PROJECT_ID }}
+      RECOVERY_PROJECT_ID: ${{ vars.GCP_RECOVERY_PROJECT_ID }}
+      ROOT_TRUST_STATE_BUCKET: ${{ vars.ROOT_TRUST_STATE_BUCKET }}
+      ROOT_TRUST_STATE_REPLICA_BUCKET: ${{ vars.ROOT_TRUST_STATE_REPLICA_BUCKET }}
+      RECOVERY_STATE_BUCKET: ${{ vars.RECOVERY_STATE_BUCKET }}
+      RECOVERY_STATE_REPLICA_BUCKET: ${{ vars.RECOVERY_STATE_REPLICA_BUCKET }}
+      RECOVERY_EXPORT_BUCKET: ${{ vars.RECOVERY_EXPORT_BUCKET }}
+      RECOVERY_EVIDENCE_BUCKET: ${{ vars.RECOVERY_EVIDENCE_BUCKET }}
+      RECOVERY_SIGNING_PROJECT_ID: ${{ vars.RECOVERY_SIGNING_PROJECT_ID }}
+      RECOVERY_SIGNING_KMS_LOCATION: ${{ vars.RECOVERY_SIGNING_KMS_LOCATION }}
+      RECOVERY_SIGNING_KMS_KEYRING: ${{ vars.RECOVERY_SIGNING_KMS_KEYRING }}
+      RECOVERY_SIGNING_KMS_KEY: ${{ vars.RECOVERY_SIGNING_KMS_KEY }}
+      RECOVERY_SIGNING_KMS_KEY_VERSION: ${{ vars.RECOVERY_SIGNING_KMS_KEY_VERSION }}
+      WIF_PROVIDER: ${{ vars.GCP_RECOVERY_WORKLOAD_IDENTITY_PROVIDER }}
+      WIF_SERVICE_ACCOUNT: ${{ vars.GCP_RECOVERY_SERVICE_ACCOUNT }}
+      WIF_AUDIENCE: ${{ vars.GCP_RECOVERY_OIDC_AUDIENCE }}
+    steps:
+      - name: Check out the exact verified source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Revalidate the current protected-main source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${GITHUB_SHA}"
+
+      - name: Require complete recovery configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            ORGANIZATION_ID AUDIT_PROJECT_ID RECOVERY_PROJECT_ID \
+            ROOT_TRUST_STATE_BUCKET ROOT_TRUST_STATE_REPLICA_BUCKET \
+            RECOVERY_STATE_BUCKET RECOVERY_STATE_REPLICA_BUCKET RECOVERY_EXPORT_BUCKET \
+            RECOVERY_EVIDENCE_BUCKET RECOVERY_SIGNING_PROJECT_ID \
+            RECOVERY_SIGNING_KMS_LOCATION RECOVERY_SIGNING_KMS_KEYRING \
+            RECOVERY_SIGNING_KMS_KEY RECOVERY_SIGNING_KMS_KEY_VERSION \
+            WIF_PROVIDER WIF_SERVICE_ACCOUNT WIF_AUDIENCE; do
+            test -n "${!name}"
+          done
+          [[ "${ORGANIZATION_ID}" =~ ^[0-9]+$ ]]
+          [[ "${AUDIT_PROJECT_ID}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]
+          [[ "${RECOVERY_PROJECT_ID}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]
+          test "${AUDIT_PROJECT_ID}" != "${RECOVERY_PROJECT_ID}"
+          [[ "${RECOVERY_SIGNING_PROJECT_ID}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]
+          [[ "${RECOVERY_SIGNING_KMS_LOCATION}" =~ ^[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z]$ ]]
+          [[ "${RECOVERY_SIGNING_KMS_KEYRING}" =~ ^[A-Za-z0-9_-]{1,63}$ ]]
+          [[ "${RECOVERY_SIGNING_KMS_KEY}" =~ ^[A-Za-z0-9_-]{1,63}$ ]]
+          [[ "${RECOVERY_SIGNING_KMS_KEY_VERSION}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${WIF_PROVIDER}" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]{4,32}/providers/[a-z0-9-]{4,32}$ ]]
+          [[ "${WIF_SERVICE_ACCOUNT}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$ ]]
+          [[ "${WIF_AUDIENCE}" == https://* || "${WIF_AUDIENCE}" == //iam.googleapis.com/* ]]
+          for bucket in \
+            "${ROOT_TRUST_STATE_BUCKET}" "${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
+            "${RECOVERY_STATE_BUCKET}" "${RECOVERY_STATE_REPLICA_BUCKET}" \
+            "${RECOVERY_EXPORT_BUCKET}" "${RECOVERY_EVIDENCE_BUCKET}"; do
+            [[ "${bucket}" =~ ^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$ ]]
+          done
+          test "$(
+            printf '%s\n' \
+              "${ROOT_TRUST_STATE_BUCKET}" "${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
+              "${RECOVERY_STATE_BUCKET}" "${RECOVERY_STATE_REPLICA_BUCKET}" \
+              "${RECOVERY_EXPORT_BUCKET}" "${RECOVERY_EVIDENCE_BUCKET}" \
+              | LC_ALL=C sort -u \
+              | wc -l \
+              | tr -d ' '
+          )" -eq 6
+
+      - name: Authenticate the isolated recovery identity
+        id: recovery-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.RECOVERY_PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+          audience: ${{ env.WIF_AUDIENCE }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Move the generated recovery credentials outside the source tree
+        shell: bash
+        env:
+          GENERATED_CREDENTIALS_FILE: ${{ steps.recovery-auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          test -n "${GENERATED_CREDENTIALS_FILE}"
+          test "$(dirname -- "${GENERATED_CREDENTIALS_FILE}")" = "${GITHUB_WORKSPACE}"
+          [[ "$(basename -- "${GENERATED_CREDENTIALS_FILE}")" =~ ^gha-creds-[A-Za-z0-9_-]+\.json$ ]]
+          test -f "${GENERATED_CREDENTIALS_FILE}"
+          test ! -L "${GENERATED_CREDENTIALS_FILE}"
+          destination="${RUNNER_TEMP}/recovery-google-credentials.json"
+          test ! -e "${destination}"
+          mv -- "${GENERATED_CREDENTIALS_FILE}" "${destination}"
+          chmod 0600 "${destination}"
+          printf '%s=%s\n' \
+            GOOGLE_APPLICATION_CREDENTIALS "${destination}" \
+            CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE "${destination}" \
+            GOOGLE_GHA_CREDS_PATH "${destination}" \
+            >>"${GITHUB_ENV}"
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: "504.0.0"
+
+      - name: Read backend and recovery generations without logging inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          inventory="${RUNNER_TEMP}/recovery-inventory"
+          mkdir -m 0700 "${inventory}"
+          : >"${inventory}/state-observations.ndjson"
+          : >"${inventory}/audit-sink-files.txt"
+          for sink_spec in \
+            'bootstrap-admin-activity|primary|log_id("cloudaudit.googleapis.com/activity")' \
+            'bootstrap-admin-activity-recovery|recovery|log_id("cloudaudit.googleapis.com/activity")' \
+            'bootstrap-security-events|primary|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"' \
+            'bootstrap-security-events-recovery|recovery|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"'; do
+            IFS='|' read -r sink_name destination_class expected_filter <<<"${sink_spec}"
+            sink_file="${inventory}/${sink_name}.sink.json"
+            case "${destination_class}" in
+              primary)
+                expected_destination="logging.googleapis.com/projects/${AUDIT_PROJECT_ID}/locations/us-central1/buckets/bootstrap-audit-primary"
+                ;;
+              recovery)
+                expected_destination="logging.googleapis.com/projects/${RECOVERY_PROJECT_ID}/locations/us-east4/buckets/bootstrap-audit-recovery"
+                ;;
+              *)
+                exit 1
+                ;;
+            esac
+            gcloud logging sinks describe "${sink_name}" \
+              --organization="${ORGANIZATION_ID}" \
+              --format=json \
+              >"${sink_file}" \
+              2>"${inventory}/${sink_name}.sink.stderr"
+            jq -e \
+              --arg name "${sink_name}" \
+              --arg destination "${expected_destination}" \
+              --arg filter "${expected_filter}" \
+              --arg writerIdentity "serviceAccount:service-org-${ORGANIZATION_ID}@gcp-sa-logging.iam.gserviceaccount.com" \
+              '(.name == $name)
+                and (.destination == $destination)
+                and (.filter == $filter)
+                and (.includeChildren == true)
+                and ((.interceptChildren // false) == false)
+                and ((.disabled // false) == false)
+                and ((.exclusions // []) == [])
+                and (.writerIdentity == $writerIdentity)' \
+              "${sink_file}" >/dev/null
+            printf '%s\n' "${sink_file}" >>"${inventory}/audit-sink-files.txt"
+          done
+          test "$(wc -l <"${inventory}/audit-sink-files.txt" | tr -d ' ')" -eq 4
+          test "$({
+            while IFS= read -r sink_file; do
+              jq -er '.writerIdentity' "${sink_file}"
+            done <"${inventory}/audit-sink-files.txt"
+          } | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 1
+          audit_sink_configuration_sha256="$({
+            while IFS= read -r sink_file; do
+              jq -S -c '{name, destination, filter, includeChildren, interceptChildren: (.interceptChildren // false), disabled: (.disabled // false), exclusions: (.exclusions // [])}' "${sink_file}"
+            done <"${inventory}/audit-sink-files.txt"
+          } | LC_ALL=C sort | sha256sum | cut -d ' ' -f1)"
+          jq -n \
+            --arg configurationSha256 "${audit_sink_configuration_sha256}" \
+            '{count: 4, exactConfigurationVerified: true, allEnabled: true, sharedOrganizationWriterIdentity: true, configurationSha256: $configurationSha256}' \
+            >"${inventory}/audit-sink-observations.json"
+          select_latest_generation() {
+            local bucket="$1"
+            local object="$2"
+            local versions_file="$3"
+            local stderr_file="$4"
+            local minimum_count="$5"
+            local generation=""
+            local generation_count=0
+            local latest_generation=""
+            local uri_prefix="gs://${bucket}/${object}#"
+            local version_uri=""
+            gcloud storage ls --all-versions "gs://${bucket}/${object}" \
+              --project="${RECOVERY_PROJECT_ID}" \
+              >"${versions_file}" \
+              2>"${stderr_file}"
+            while IFS= read -r version_uri; do
+              case "${version_uri}" in
+                "${uri_prefix}"*) generation="${version_uri#"${uri_prefix}"}" ;;
+                *) return 1 ;;
+              esac
+              [[ "${generation}" =~ ^[1-9][0-9]*$ ]]
+              generation_count="$((generation_count + 1))"
+              if test -z "${latest_generation}" \
+                  || test "${#generation}" -gt "${#latest_generation}" \
+                  || { test "${#generation}" -eq "${#latest_generation}" && [[ "${generation}" > "${latest_generation}" ]]; }; then
+                latest_generation="${generation}"
+              fi
+            done <"${versions_file}"
+            test "${generation_count}" -ge "${minimum_count}"
+            test -n "${latest_generation}"
+            printf '%s|%s\n' "${generation_count}" "${latest_generation}"
+          }
+          for bucket_entry in \
+            "root-trust-primary|${ROOT_TRUST_STATE_BUCKET}" \
+            "root-trust-replica|${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
+            "recovery-plane-primary|${RECOVERY_STATE_BUCKET}" \
+            "recovery-plane-replica|${RECOVERY_STATE_REPLICA_BUCKET}" \
+            "recovery-export|${RECOVERY_EXPORT_BUCKET}" \
+            "recovery-evidence|${RECOVERY_EVIDENCE_BUCKET}"; do
+            IFS='|' read -r _ bucket <<<"${bucket_entry}"
+            safe_name="$(printf '%s' "${bucket}" | sha256sum | cut -d ' ' -f1)"
+            gcloud storage buckets describe "gs://${bucket}" \
+              --project="${RECOVERY_PROJECT_ID}" \
+              --format=json \
+              >"${inventory}/${safe_name}.bucket.json" \
+              2>"${inventory}/${safe_name}.bucket.stderr"
+            jq -e '
+              .iamConfiguration.publicAccessPrevention == "enforced"
+              and .iamConfiguration.uniformBucketLevelAccess.enabled == true
+              and .versioning.enabled == true
+              and ((.softDeletePolicy.retentionDurationSeconds | tonumber) >= 2592000)
+              and ((.encryption.defaultKmsKeyName | strings | length) > 0)
+            ' "${inventory}/${safe_name}.bucket.json" >/dev/null
+            if test "${bucket}" = "${RECOVERY_EXPORT_BUCKET}"; then
+              jq -e '
+                .retentionPolicy.isLocked == true
+                and ((.retentionPolicy.retentionPeriod | tonumber) >= 2592000)
+              ' "${inventory}/${safe_name}.bucket.json" >/dev/null
+            elif test "${bucket}" = "${RECOVERY_EVIDENCE_BUCKET}"; then
+              jq -e '
+                .retentionPolicy.isLocked == true
+                and ((.retentionPolicy.retentionPeriod | tonumber) >= 220752000)
+              ' "${inventory}/${safe_name}.bucket.json" >/dev/null
+            fi
+          done
+          root_primary_safe="$(printf '%s' "${ROOT_TRUST_STATE_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          root_replica_safe="$(printf '%s' "${ROOT_TRUST_STATE_REPLICA_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          recovery_primary_safe="$(printf '%s' "${RECOVERY_STATE_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          recovery_replica_safe="$(printf '%s' "${RECOVERY_STATE_REPLICA_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          export_safe="$(printf '%s' "${RECOVERY_EXPORT_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          evidence_safe="$(printf '%s' "${RECOVERY_EVIDENCE_BUCKET}" | sha256sum | cut -d ' ' -f1)"
+          test "$(jq -er '.location' "${inventory}/${root_primary_safe}.bucket.json")" \
+            != "$(jq -er '.location' "${inventory}/${root_replica_safe}.bucket.json")"
+          test "$(jq -er '.location' "${inventory}/${recovery_primary_safe}.bucket.json")" \
+            != "$(jq -er '.location' "${inventory}/${recovery_replica_safe}.bucket.json")"
+          for state_pair in \
+            "root-trust|${ROOT_TRUST_STATE_BUCKET}|${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
+            "recovery-plane|${RECOVERY_STATE_BUCKET}|${RECOVERY_STATE_REPLICA_BUCKET}"; do
+            IFS='|' read -r state_prefix primary_bucket replica_bucket <<<"${state_pair}"
+            for state_copy in "primary|${primary_bucket}" "replica|${replica_bucket}"; do
+              IFS='|' read -r copy_name state_bucket <<<"${state_copy}"
+              generations_file="${inventory}/${state_prefix}.${copy_name}-state-generations.txt"
+              selection="$(select_latest_generation \
+                "${state_bucket}" \
+                "${state_prefix}/default.tfstate" \
+                "${generations_file}" \
+                "${inventory}/${state_prefix}.${copy_name}-state-generations.stderr" \
+                3)"
+              IFS='|' read -r generation_count generation <<<"${selection}"
+              case "${copy_name}" in
+                primary)
+                  primary_generation_count="${generation_count}"
+                  primary_generation="${generation}"
+                  ;;
+                replica)
+                  replica_generation_count="${generation_count}"
+                  replica_generation="${generation}"
+                  ;;
+              esac
+            done
+            primary_digest="$(
+              gcloud storage cat "gs://${primary_bucket}/${state_prefix}/default.tfstate#${primary_generation}" \
+                --project="${RECOVERY_PROJECT_ID}" \
+                2>"${inventory}/${state_prefix}.primary-state.stderr" \
+                | sha256sum \
+                | cut -d ' ' -f1
+            )"
+            replica_digest="$(
+              gcloud storage cat "gs://${replica_bucket}/${state_prefix}/default.tfstate#${replica_generation}" \
+                --project="${RECOVERY_PROJECT_ID}" \
+                2>"${inventory}/${state_prefix}.replica-state.stderr" \
+                | sha256sum \
+                | cut -d ' ' -f1
+            )"
+            test "${primary_digest}" = "${replica_digest}"
+            printf '%s\n' "${primary_digest}" >"${inventory}/${state_prefix}.replicated-state.sha256"
+            export_generations_file="${inventory}/${state_prefix}.export-state-generations.txt"
+            export_selection="$(select_latest_generation \
+              "${RECOVERY_EXPORT_BUCKET}" \
+              "${state_prefix}/default.tfstate" \
+              "${export_generations_file}" \
+              "${inventory}/${state_prefix}.export-state-generations.stderr" \
+              3)"
+            IFS='|' read -r export_generation_count export_generation <<<"${export_selection}"
+            export_digest="$(
+              gcloud storage cat "gs://${RECOVERY_EXPORT_BUCKET}/${state_prefix}/default.tfstate#${export_generation}" \
+                --project="${RECOVERY_PROJECT_ID}" \
+                2>"${inventory}/${state_prefix}.export-state.stderr" \
+                | sha256sum \
+                | cut -d ' ' -f1
+            )"
+            test "${primary_digest}" = "${export_digest}"
+            jq -n \
+              --arg key "${state_prefix}" \
+              --argjson primaryGenerationCount "${primary_generation_count}" \
+              --argjson replicaGenerationCount "${replica_generation_count}" \
+              --argjson exportGenerationCount "${export_generation_count}" \
+              --arg primaryGeneration "${primary_generation}" \
+              --arg replicaGeneration "${replica_generation}" \
+              --arg exportGeneration "${export_generation}" \
+              --arg latestStateSha256 "${primary_digest}" \
+              '{key: $key, value: {
+                primaryGenerationCount: $primaryGenerationCount,
+                replicaGenerationCount: $replicaGenerationCount,
+                exportGenerationCount: $exportGenerationCount,
+                primaryGeneration: $primaryGeneration,
+                replicaGeneration: $replicaGeneration,
+                exportGeneration: $exportGeneration,
+                latestStateSha256: $latestStateSha256,
+                primaryReplicaExportBytesEqual: true
+              }}' >>"${inventory}/state-observations.ndjson"
+          done
+          test "$(
+            jq -r '.encryption.defaultKmsKeyName' \
+              "${inventory}/${root_primary_safe}.bucket.json" \
+              "${inventory}/${root_replica_safe}.bucket.json" \
+              "${inventory}/${recovery_primary_safe}.bucket.json" \
+              "${inventory}/${recovery_replica_safe}.bucket.json" \
+              "${inventory}/${export_safe}.bucket.json" \
+              "${inventory}/${evidence_safe}.bucket.json" \
+              | LC_ALL=C sort -u \
+              | wc -l \
+              | tr -d ' '
+          )" -eq 6
+          gcloud kms keys describe "${RECOVERY_SIGNING_KMS_KEY}" \
+            --project="${RECOVERY_SIGNING_PROJECT_ID}" \
+            --location="${RECOVERY_SIGNING_KMS_LOCATION}" \
+            --keyring="${RECOVERY_SIGNING_KMS_KEYRING}" \
+            --format=json \
+            >"${inventory}/recovery-signing-key.json" \
+            2>"${inventory}/recovery-signing-key.stderr"
+          jq -e '.purpose == "ASYMMETRIC_SIGN"' \
+            "${inventory}/recovery-signing-key.json" >/dev/null
+          gcloud kms keys versions describe "${RECOVERY_SIGNING_KMS_KEY_VERSION}" \
+            --project="${RECOVERY_SIGNING_PROJECT_ID}" \
+            --location="${RECOVERY_SIGNING_KMS_LOCATION}" \
+            --keyring="${RECOVERY_SIGNING_KMS_KEYRING}" \
+            --key="${RECOVERY_SIGNING_KMS_KEY}" \
+            --format=json \
+            >"${inventory}/recovery-signing-key-version.json" \
+            2>"${inventory}/recovery-signing-key-version.stderr"
+          jq -e '
+            .algorithm == "EC_SIGN_P256_SHA256"
+            and .protectionLevel == "HSM"
+            and .state == "ENABLED"
+          ' "${inventory}/recovery-signing-key-version.json" >/dev/null
+          canonical_key_version="projects/${RECOVERY_SIGNING_PROJECT_ID}/locations/${RECOVERY_SIGNING_KMS_LOCATION}/keyRings/${RECOVERY_SIGNING_KMS_KEYRING}/cryptoKeys/${RECOVERY_SIGNING_KMS_KEY}/cryptoKeyVersions/${RECOVERY_SIGNING_KMS_KEY_VERSION}"
+          test "$(jq -er '.name' "${inventory}/recovery-signing-key-version.json")" = "${canonical_key_version}"
+          public_metadata_selection="$(select_latest_generation \
+            "${RECOVERY_EVIDENCE_BUCKET}" \
+            "trust/public-trust-metadata.json" \
+            "${inventory}/public-trust-metadata-generations.txt" \
+            "${inventory}/public-trust-metadata-generations.stderr" \
+            1)"
+          IFS='|' read -r _ public_trust_metadata_generation <<<"${public_metadata_selection}"
+          gcloud storage cat \
+            "gs://${RECOVERY_EVIDENCE_BUCKET}/trust/public-trust-metadata.json#${public_trust_metadata_generation}" \
+            --project="${RECOVERY_PROJECT_ID}" \
+            >"${inventory}/public-trust-metadata.json" \
+            2>"${inventory}/public-trust-metadata.stderr"
+          jq -e \
+            --arg version "${canonical_key_version}" \
+            --arg provider "${WIF_PROVIDER}" \
+            --arg audience "${WIF_AUDIENCE}" \
+            --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg rootPrimary "${ROOT_TRUST_STATE_BUCKET}" \
+            --arg rootReplica "${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
+            --arg recoveryPrimary "${RECOVERY_STATE_BUCKET}" \
+            --arg recoveryReplica "${RECOVERY_STATE_REPLICA_BUCKET}" \
+            '(.signing_key_versions["recovery-evidence"] == $version)
+              and ((.signing_windows | keys | sort) == ["audit-anchor", "bootstrap-handoff", "recovery-evidence"])
+              and all(.signing_windows[];
+                (.active_version_ref | test("^v[0-9]{8}$"))
+                and (.activation_window_start | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$"))
+                and (.rotation_deadline | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$"))
+                and (.active_version_ref == ("v" + (.activation_window_start[0:10] | gsub("-"; ""))))
+                and (((.rotation_deadline | fromdateiso8601) - (.activation_window_start | fromdateiso8601)) == 7776000)
+              )
+              and (.signing_windows["recovery-evidence"].activation_window_start <= $now)
+              and ($now < .signing_windows["recovery-evidence"].rotation_deadline)
+              and (.federation_providers["github-recovery"] == $provider)
+              and (.federation_audiences["github-recovery"] == $audience)
+              and (.state_backends == {
+                "root-trust": {
+                  bucket: $rootPrimary,
+                  prefix: "root-trust",
+                  replica_bucket: $rootReplica
+                },
+                "recovery-plane": {
+                  bucket: $recoveryPrimary,
+                  prefix: "recovery-plane",
+                  replica_bucket: $recoveryReplica
+                }
+              })' \
+            "${inventory}/public-trust-metadata.json" >/dev/null
+          for manifest in manifests/*.yaml; do
+            manifest_path="${manifest#./}"
+            manifest_digest="sha256:$(sha256sum "${manifest}" | cut -d ' ' -f1)"
+            jq -e \
+              --arg path "${manifest_path}" \
+              --arg digest "${manifest_digest}" \
+              '.manifest_digests[$path] == $digest' \
+              "${inventory}/public-trust-metadata.json" >/dev/null
+          done
+          test "$(jq -r '.manifest_digests | keys[]' "${inventory}/public-trust-metadata.json" | wc -l | tr -d ' ')" -eq 7
+          sha256sum "${inventory}/public-trust-metadata.json" \
+            | cut -d ' ' -f1 \
+            >"${inventory}/public-trust-metadata.sha256"
+          restore_inventory_selection="$(select_latest_generation \
+            "${RECOVERY_EXPORT_BUCKET}" \
+            "restore/inventory.json" \
+            "${inventory}/restore-inventory-generations.txt" \
+            "${inventory}/restore-inventory-generations.stderr" \
+            1)"
+          IFS='|' read -r _ restore_inventory_generation <<<"${restore_inventory_selection}"
+          gcloud storage cat \
+            "gs://${RECOVERY_EXPORT_BUCKET}/restore/inventory.json#${restore_inventory_generation}" \
+            --project="${RECOVERY_PROJECT_ID}" \
+            >"${inventory}/restore-inventory.json" \
+            2>"${inventory}/restore-inventory.stderr"
+          restore_manifest_digest="sha256:$(sha256sum recovery/restore-manifest.yaml | cut -d ' ' -f1)"
+          jq -e \
+            --arg rootBucket "${ROOT_TRUST_STATE_BUCKET}" \
+            --arg recoveryBucket "${RECOVERY_STATE_BUCKET}" \
+            --arg exportBucket "${RECOVERY_EXPORT_BUCKET}" \
+            --arg restoreDigest "${restore_manifest_digest}" \
+            '(.schema_version == 1)
+              and (.minimum_retained_state_generations == 3)
+              and (.restore_manifest_digest == $restoreDigest)
+              and (.source_state_objects == {
+                "root-trust": {bucket: $rootBucket, object: "root-trust/default.tfstate"},
+                "recovery-plane": {bucket: $recoveryBucket, object: "recovery-plane/default.tfstate"}
+              })
+              and (.export_state_objects == {
+                "root-trust": {bucket: $exportBucket, object: "root-trust/default.tfstate"},
+                "recovery-plane": {bucket: $exportBucket, object: "recovery-plane/default.tfstate"}
+              })
+              and (.runtime_selection_required == ["generation", "sha256"])
+              and ((.excludes | sort) == ["credentials", "kms-private-key-material", "service-account-keys"])' \
+            "${inventory}/restore-inventory.json" >/dev/null
+          sha256sum "${inventory}/restore-inventory.json" \
+            | cut -d ' ' -f1 \
+            >"${inventory}/restore-inventory.sha256"
+          jq -s 'from_entries' "${inventory}/state-observations.ndjson" \
+            >"${inventory}/state-observations.json"
+          jq -n \
+            --slurpfile rootPrimary "${inventory}/${root_primary_safe}.bucket.json" \
+            --slurpfile rootReplica "${inventory}/${root_replica_safe}.bucket.json" \
+            --slurpfile recoveryPrimary "${inventory}/${recovery_primary_safe}.bucket.json" \
+            --slurpfile recoveryReplica "${inventory}/${recovery_replica_safe}.bucket.json" \
+            --slurpfile exportBucket "${inventory}/${export_safe}.bucket.json" \
+            --slurpfile evidenceBucket "${inventory}/${evidence_safe}.bucket.json" \
+            --slurpfile states "${inventory}/state-observations.json" \
+            --slurpfile auditSinks "${inventory}/audit-sink-observations.json" \
+            --rawfile publicTrustMetadataSha256 "${inventory}/public-trust-metadata.sha256" \
+            --rawfile restoreInventorySha256 "${inventory}/restore-inventory.sha256" \
+            --arg publicTrustMetadataGeneration "${public_trust_metadata_generation}" \
+            --arg restoreInventoryGeneration "${restore_inventory_generation}" \
+            '
+              def controls($bucket): {
+                publicAccessPrevention: $bucket.iamConfiguration.publicAccessPrevention,
+                uniformBucketLevelAccess: $bucket.iamConfiguration.uniformBucketLevelAccess.enabled,
+                versioning: $bucket.versioning.enabled,
+                softDeleteRetentionSeconds: ($bucket.softDeletePolicy.retentionDurationSeconds | tonumber),
+                cmekConfigured: (($bucket.encryption.defaultKmsKeyName | strings | length) > 0)
+              };
+              {
+                schemaVersion: "bootstrap.mindclade.dev/recovery-control-summary/v1",
+                publicTrustMetadataSha256: ($publicTrustMetadataSha256 | rtrimstr("\n")),
+                publicTrustMetadataGeneration: $publicTrustMetadataGeneration,
+                restoreInventorySha256: ($restoreInventorySha256 | rtrimstr("\n")),
+                restoreInventoryGeneration: $restoreInventoryGeneration,
+                auditSinks: $auditSinks[0],
+                bucketControls: {
+                  rootTrustPrimary: controls($rootPrimary[0]),
+                  rootTrustReplica: controls($rootReplica[0]),
+                  recoveryPlanePrimary: controls($recoveryPrimary[0]),
+                  recoveryPlaneReplica: controls($recoveryReplica[0]),
+                  recoveryExport: (controls($exportBucket[0]) + {
+                    retentionPolicyLocked: $exportBucket[0].retentionPolicy.isLocked,
+                    retentionSeconds: ($exportBucket[0].retentionPolicy.retentionPeriod | tonumber)
+                  }),
+                  recoveryEvidence: (controls($evidenceBucket[0]) + {
+                    retentionPolicyLocked: $evidenceBucket[0].retentionPolicy.isLocked,
+                    retentionSeconds: ($evidenceBucket[0].retentionPolicy.retentionPeriod | tonumber)
+                  })
+                },
+                stateCopies: $states[0]
+              }
+            ' >"${RUNNER_TEMP}/recovery-control-summary.json"
+
+      - name: Render and KMS-sign redacted connected evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          bundle="${RUNNER_TEMP}/connected-evidence"
+          mkdir -m 0700 "${bundle}"
+          cp "${RUNNER_TEMP}/recovery-control-summary.json" "${bundle}/control-summary.json"
+          control_summary_digest="$(sha256sum "${bundle}/control-summary.json" | cut -d ' ' -f1)"
+          restore_digest="$(sha256sum recovery/restore-manifest.yaml | cut -d ' ' -f1)"
+          signing_key_version="projects/${RECOVERY_SIGNING_PROJECT_ID}/locations/${RECOVERY_SIGNING_KMS_LOCATION}/keyRings/${RECOVERY_SIGNING_KMS_KEYRING}/cryptoKeys/${RECOVERY_SIGNING_KMS_KEY}/cryptoKeyVersions/${RECOVERY_SIGNING_KMS_KEY_VERSION}"
+          gcloud kms keys versions get-public-key "${RECOVERY_SIGNING_KMS_KEY_VERSION}" \
+            --project="${RECOVERY_SIGNING_PROJECT_ID}" \
+            --location="${RECOVERY_SIGNING_KMS_LOCATION}" \
+            --keyring="${RECOVERY_SIGNING_KMS_KEYRING}" \
+            --key="${RECOVERY_SIGNING_KMS_KEY}" \
+            --output-file="${bundle}/public-key.pem"
+          public_key_digest="$(sha256sum "${bundle}/public-key.pem" | cut -d ' ' -f1)"
+          jq -n \
+            --arg schemaVersion "bootstrap.mindclade.dev/recovery-evidence/v1" \
+            --arg mode "connected-read-only" \
+            --arg result "passed" \
+            --arg sourceSha "${GITHUB_SHA}" \
+            --arg controlSummarySha256 "${control_summary_digest}" \
+            --arg restoreManifestSha256 "${restore_digest}" \
+            --arg signingKeyVersion "${signing_key_version}" \
+            --arg signingPublicKeySha256 "${public_key_digest}" \
+            --arg runId "${GITHUB_RUN_ID}" \
+            --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion: $schemaVersion, mode: $mode, result: $result, sourceSha: $sourceSha, controlSummarySha256: $controlSummarySha256, restoreManifestSha256: $restoreManifestSha256, signingKeyVersion: $signingKeyVersion, signingPublicKeySha256: $signingPublicKeySha256, runId: $runId, runAttempt: $runAttempt, verifiedAt: $verifiedAt}' \
+            >"${bundle}/evidence.json"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "${GITHUB_SHA}"
+          gcloud kms asymmetric-sign \
+            --project="${RECOVERY_SIGNING_PROJECT_ID}" \
+            --location="${RECOVERY_SIGNING_KMS_LOCATION}" \
+            --keyring="${RECOVERY_SIGNING_KMS_KEYRING}" \
+            --key="${RECOVERY_SIGNING_KMS_KEY}" \
+            --version="${RECOVERY_SIGNING_KMS_KEY_VERSION}" \
+            --digest-algorithm=sha256 \
+            --input-file="${bundle}/evidence.json" \
+            --signature-file="${bundle}/evidence.sig"
+          openssl dgst -sha256 \
+            -verify "${bundle}/public-key.pem" \
+            -signature "${bundle}/evidence.sig" \
+            "${bundle}/evidence.json"
+          (
+            cd "${bundle}"
+            sha256sum control-summary.json evidence.json evidence.sig public-key.pem >SHA256SUMS
+          )
+
+      - name: Retain only redacted signed evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: connected-recovery-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/connected-evidence/
+          if-no-files-found: error
+          retention-days: 90

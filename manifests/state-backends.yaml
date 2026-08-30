@@ -1,0 +1,66 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: StateBackendSet
+metadata:
+  name: bootstrap-state
+spec:
+  backends:
+    root-trust:
+      projectRef: state-root
+      bucketName:
+        valueFrom:
+          env: ROOT_TRUST_STATE_BUCKET
+      prefix: root-trust
+      location: us-central1
+      encryption:
+        keyName:
+          valueFrom:
+            env: ROOT_TRUST_STATE_KMS_KEY
+        protectionLevel: HSM
+      replica:
+        projectRef: recovery-root
+        bucketName:
+          valueFrom:
+            env: ROOT_TRUST_STATE_REPLICA_BUCKET
+        location: us-east4
+        encryption:
+          keyName:
+            valueFrom:
+              env: ROOT_TRUST_STATE_REPLICA_KMS_KEY
+          protectionLevel: HSM
+      controls:
+        uniformBucketLevelAccess: true
+        publicAccessPrevention: enforced
+        versioning: true
+        softDeleteRetentionDays: 30
+        deletionProtection: true
+        nativeLocking: true
+    recovery-plane:
+      projectRef: recovery-root
+      bucketName:
+        valueFrom:
+          env: RECOVERY_STATE_BUCKET
+      prefix: recovery-plane
+      location: us-east4
+      encryption:
+        keyName:
+          valueFrom:
+            env: RECOVERY_STATE_KMS_KEY
+        protectionLevel: HSM
+      replica:
+        projectRef: state-root
+        bucketName:
+          valueFrom:
+            env: RECOVERY_STATE_REPLICA_BUCKET
+        location: us-central1
+        encryption:
+          keyName:
+            valueFrom:
+              env: RECOVERY_STATE_REPLICA_KMS_KEY
+          protectionLevel: HSM
+      controls:
+        uniformBucketLevelAccess: true
+        publicAccessPrevention: enforced
+        versioning: true
+        softDeleteRetentionDays: 30
+        deletionProtection: true
+        nativeLocking: true

@@ -1,0 +1,58 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: TrustAnchorSet
+metadata:
+  name: root-trust
+spec:
+  organization:
+    valueFrom:
+      env: GCP_ORGANIZATION_ID
+  billingAccount:
+    valueFrom:
+      env: GCP_BILLING_ACCOUNT_ID
+  projects:
+    state-root:
+      projectId:
+        valueFrom:
+          env: GCP_STATE_ROOT_PROJECT_ID
+      plane: root-trust
+      region: us-central1
+    audit-root:
+      projectId:
+        valueFrom:
+          env: GCP_AUDIT_ROOT_PROJECT_ID
+      plane: root-trust
+      region: us-central1
+    identity-root:
+      projectId:
+        valueFrom:
+          env: GCP_IDENTITY_ROOT_PROJECT_ID
+      plane: root-trust
+      region: us-central1
+    signing-root:
+      projectId:
+        valueFrom:
+          env: GCP_SIGNING_ROOT_PROJECT_ID
+      plane: root-trust
+      region: us-central1
+    recovery-root:
+      projectId:
+        valueFrom:
+          env: GCP_RECOVERY_ROOT_PROJECT_ID
+      plane: recovery
+      region: us-east4
+  administratorPrincipals:
+    root:
+      valueFrom:
+        env: ROOT_TRUST_ADMIN_GROUP
+    recovery:
+      valueFrom:
+        env: RECOVERY_ADMIN_GROUP
+    security:
+      valueFrom:
+        env: SECURITY_APPROVER_GROUP
+  geographicalBoundary:
+    allowedLocations:
+      - us-central1
+      - us-east4
+    defaultLocation: us-central1
+    recoveryLocation: us-east4

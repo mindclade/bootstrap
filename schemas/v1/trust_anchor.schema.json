@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.mindclade.io/bootstrap/v1/trust_anchor.schema.json",
+  "title": "Mindclade bootstrap trust anchors",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
+    "kind": {"const": "TrustAnchorSet"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organization", "billingAccount", "projects", "administratorPrincipals", "geographicalBoundary"],
+      "properties": {
+        "organization": {"$ref": "#/$defs/envRef"},
+        "billingAccount": {"$ref": "#/$defs/envRef"},
+        "projects": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state-root", "audit-root", "identity-root", "signing-root", "recovery-root"],
+          "properties": {
+            "state-root": {"$ref": "#/$defs/project"},
+            "audit-root": {"$ref": "#/$defs/project"},
+            "identity-root": {"$ref": "#/$defs/project"},
+            "signing-root": {"$ref": "#/$defs/project"},
+            "recovery-root": {"$ref": "#/$defs/project"}
+          }
+        },
+        "administratorPrincipals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root", "recovery", "security"],
+          "properties": {
+            "root": {"$ref": "#/$defs/envRef"},
+            "recovery": {"$ref": "#/$defs/envRef"},
+            "security": {"$ref": "#/$defs/envRef"}
+          }
+        },
+        "geographicalBoundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allowedLocations", "defaultLocation", "recoveryLocation"],
+          "properties": {
+            "allowedLocations": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {"enum": ["us-central1", "us-east4"]}
+            },
+            "defaultLocation": {"const": "us-central1"},
+            "recoveryLocation": {"const": "us-east4"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+    },
+    "envRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valueFrom"],
+      "properties": {
+        "valueFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["env"],
+          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "plane", "region"],
+      "properties": {
+        "projectId": {"$ref": "#/$defs/envRef"},
+        "plane": {"enum": ["root-trust", "recovery"]},
+        "region": {"enum": ["us-central1", "us-east4"]}
+      }
+    }
+  }
+}

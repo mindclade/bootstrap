@@ -1,0 +1,11 @@
+# Bootstrap authority always requires both operations and security review.
+* @mindclade/platform-operations @mindclade/security
+
+/.github/ @mindclade/platform-operations @mindclade/security
+/manifests/ @mindclade/platform-operations @mindclade/security
+/schemas/ @mindclade/platform-operations @mindclade/security
+/opentofu/ @mindclade/platform-operations @mindclade/security
+/policy/ @mindclade/platform-operations @mindclade/security
+/recovery/ @mindclade/platform-operations @mindclade/security
+/runbooks/ @mindclade/platform-operations @mindclade/security
+/BLUEPRINT.md @mindclade/platform-operations @mindclade/security

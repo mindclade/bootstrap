@@ -1,0 +1,77 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "ring0_source",
+    srcs = glob(
+        [
+            ".github/**",
+            "manifests/**",
+            "opentofu/**",
+            "policy/**",
+            "recovery/**",
+            "runbooks/**",
+            "schemas/**",
+            "tests/**",
+            "*.md",
+            "*.yaml",
+            "*.bazel",
+        ],
+    ) + [
+        ".editorconfig",
+        ".gitignore",
+        "LICENSE",
+        "justfile",
+    ],
+)
+
+py_test(
+    name = "manifest_schema_contract_test",
+    srcs = ["tests/contract/test_manifest_schemas.py"],
+    data = [
+        ":ring0_source",
+        "//tooling:bootstrapctl",
+        "//tooling:ring0_source",
+    ],
+    main = "tests/contract/test_manifest_schemas.py",
+)
+
+py_test(
+    name = "minimum_privilege_plan_test",
+    srcs = ["tests/plan/test_minimum_privilege.py"],
+    data = ["//tooling:bootstrapctl"],
+    main = "tests/plan/test_minimum_privilege.py",
+)
+
+py_test(
+    name = "partial_bootstrap_apply_test",
+    srcs = ["tests/failure/test_partial_bootstrap_apply.py"],
+    data = [
+        ":ring0_source",
+        "//tooling:bootstrapctl",
+        "//tooling:ring0_source",
+    ],
+    main = "tests/failure/test_partial_bootstrap_apply.py",
+)
+
+py_test(
+    name = "isolated_restore_test",
+    srcs = ["tests/recovery/test_isolated_restore.py"],
+    data = [
+        ":ring0_source",
+        "//tooling:bootstrapctl",
+        "//tooling:ring0_source",
+    ],
+    main = "tests/recovery/test_isolated_restore.py",
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":isolated_restore_test",
+        ":manifest_schema_contract_test",
+        ":minimum_privilege_plan_test",
+        ":partial_bootstrap_apply_test",
+    ],
+)

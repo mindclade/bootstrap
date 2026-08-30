@@ -1,0 +1,57 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: AuditRootSet
+metadata:
+  name: bootstrap-audit
+spec:
+  organization:
+    valueFrom:
+      env: GCP_ORGANIZATION_ID
+  projectRef: audit-root
+  retentionDays: 2555
+  lockAfterQualification:
+    enabled: true
+    qualificationEvidenceRequired: true
+    locked: false
+  logBuckets:
+    primary:
+      projectRef: audit-root
+      bucketId: bootstrap-audit-primary
+      location: us-central1
+      encryptionKeyName:
+        valueFrom:
+          env: AUDIT_PRIMARY_KMS_KEY
+    recovery:
+      projectRef: recovery-root
+      bucketId: bootstrap-audit-recovery
+      location: us-east4
+      encryptionKeyName:
+        valueFrom:
+          env: AUDIT_RECOVERY_KMS_KEY
+  aggregatedSinks:
+    admin-activity:
+      sinkName: bootstrap-admin-activity
+      destinationBucketRef: primary
+      includeChildren: true
+      filter: log_id("cloudaudit.googleapis.com/activity")
+    admin-activity-recovery:
+      sinkName: bootstrap-admin-activity-recovery
+      destinationBucketRef: recovery
+      includeChildren: true
+      filter: log_id("cloudaudit.googleapis.com/activity")
+    security-events:
+      sinkName: bootstrap-security-events
+      destinationBucketRef: primary
+      includeChildren: true
+      filter: severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"
+    security-events-recovery:
+      sinkName: bootstrap-security-events-recovery
+      destinationBucketRef: recovery
+      includeChildren: true
+      filter: severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"
+  readers:
+    security:
+      valueFrom:
+        env: AUDIT_SECURITY_READER_GROUP
+    compliance:
+      valueFrom:
+        env: AUDIT_COMPLIANCE_READER_GROUP

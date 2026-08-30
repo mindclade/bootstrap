@@ -1,0 +1,28 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: RestoreManifest
+metadata:
+  name: ring0-isolated-restore
+  owner: mindclade-security
+spec:
+  primary:
+    backend: ROOT_TRUST_STATE_BACKEND
+    projectRef: ROOT_TRUST_STATE_PROJECT
+    generationFrom: ROOT_TRUST_STATE_GENERATION
+    digestFrom: ROOT_TRUST_STATE_SHA256
+  recovery:
+    backend: RECOVERY_STATE_BACKEND
+    projectRef: RECOVERY_STATE_PROJECT
+    generationFrom: RECOVERY_STATE_GENERATION
+    digestFrom: RECOVERY_STATE_SHA256
+  requiredArtifacts:
+    - RECOVERY_EXPORT_MANIFEST
+    - RECOVERY_EVIDENCE_BUNDLE
+    - RECOVERY_EVIDENCE_SIGNATURE
+    - RECOVERY_SIGNING_PUBLIC_KEY
+  verification:
+    maxEvidenceAgeHours: 168
+    requiresIndependentOperator: true
+    forbiddenDependencies:
+      - GKE
+      - Argo CD
+      - application workloads

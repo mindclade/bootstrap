@@ -1,0 +1,77 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: BreakGlassRoleSet
+metadata:
+  name: bootstrap-break-glass
+spec:
+  projectRef: identity-root
+  location: global
+  requesters:
+    primary:
+      valueFrom:
+        env: BREAK_GLASS_REQUESTER_1
+    secondary:
+      valueFrom:
+        env: BREAK_GLASS_REQUESTER_2
+  approvers:
+    security-primary:
+      valueFrom:
+        env: BREAK_GLASS_APPROVER_1
+    security-secondary:
+      valueFrom:
+        env: BREAK_GLASS_APPROVER_2
+  notificationRecipients:
+    security-operations:
+      valueFrom:
+        env: BREAK_GLASS_NOTIFICATION_RECIPIENT
+  entitlements:
+    identity-root-administration:
+      targetProjectRef: identity-root
+      roles:
+        - roles/iam.workloadIdentityPoolAdmin
+        - roles/iam.serviceAccountAdmin
+        - roles/resourcemanager.projectIamAdmin
+        - roles/serviceusage.serviceUsageAdmin
+      maxDurationSeconds: 7200
+      approval:
+        requiredApprovals: 2
+        justificationRequired: true
+        allowSelfApproval: false
+      standingAccess: false
+    root-trust-administration:
+      targetProjectRef: state-root
+      roles:
+        - roles/resourcemanager.projectIamAdmin
+        - roles/iam.securityAdmin
+      maxDurationSeconds: 7200
+      approval:
+        requiredApprovals: 2
+        justificationRequired: true
+        allowSelfApproval: false
+      standingAccess: false
+    recovery-root-administration:
+      targetProjectRef: recovery-root
+      roles:
+        - roles/cloudkms.admin
+        - roles/iam.roleAdmin
+        - roles/iam.serviceAccountAdmin
+        - roles/logging.admin
+        - roles/resourcemanager.projectIamAdmin
+        - roles/serviceusage.serviceUsageAdmin
+        - roles/storage.admin
+        - roles/storagetransfer.user
+      maxDurationSeconds: 7200
+      approval:
+        requiredApprovals: 2
+        justificationRequired: true
+        allowSelfApproval: false
+      standingAccess: false
+    signing-root-administration:
+      targetProjectRef: signing-root
+      roles:
+        - roles/cloudkms.admin
+      maxDurationSeconds: 7200
+      approval:
+        requiredApprovals: 2
+        justificationRequired: true
+        allowSelfApproval: false
+      standingAccess: false

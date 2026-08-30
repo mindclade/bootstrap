@@ -1,0 +1,56 @@
+apiVersion: bootstrap.mindclade.dev/v1
+kind: SigningRootSet
+metadata:
+  name: bootstrap-signing
+spec:
+  projectRef: signing-root
+  location: us-central1
+  keyRing: bootstrap-signing
+  administrators:
+    - valueFrom:
+        env: KMS_ADMIN_PRINCIPAL_1
+    - valueFrom:
+        env: KMS_ADMIN_PRINCIPAL_2
+  keys:
+    bootstrap-handoff:
+      purpose: ASYMMETRIC_SIGN
+      algorithm: EC_SIGN_P256_SHA256
+      protectionLevel: HSM
+      rotationDays: 90
+      activeVersionRef: v20260829
+      versions:
+        v20260829:
+          activationWindowStart: "2026-08-29T00:00:00Z"
+          rotationDeadline: "2026-11-27T00:00:00Z"
+      deletionProtection: true
+      signers:
+        - valueFrom:
+            env: BOOTSTRAP_HANDOFF_SIGNER
+    audit-anchor:
+      purpose: ASYMMETRIC_SIGN
+      algorithm: EC_SIGN_P256_SHA256
+      protectionLevel: HSM
+      rotationDays: 90
+      activeVersionRef: v20260829
+      versions:
+        v20260829:
+          activationWindowStart: "2026-08-29T00:00:00Z"
+          rotationDeadline: "2026-11-27T00:00:00Z"
+      deletionProtection: true
+      signers:
+        - valueFrom:
+            env: AUDIT_ANCHOR_SIGNER
+    recovery-evidence:
+      purpose: ASYMMETRIC_SIGN
+      algorithm: EC_SIGN_P256_SHA256
+      protectionLevel: HSM
+      rotationDays: 90
+      activeVersionRef: v20260829
+      versions:
+        v20260829:
+          activationWindowStart: "2026-08-29T00:00:00Z"
+          rotationDeadline: "2026-11-27T00:00:00Z"
+      deletionProtection: true
+      signers:
+        - valueFrom:
+            env: RECOVERY_EVIDENCE_SIGNER

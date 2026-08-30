@@ -1,0 +1,58 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "ring0_source",
+    srcs = glob(["**/*.go"]) + [
+        "BUILD.bazel",
+        "go.mod",
+        "go.sum",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+go_library(
+    name = "manifest",
+    srcs = ["internal/manifest/manifest.go"],
+    importpath = "github.com/mindclade/bootstrap/tooling/internal/manifest",
+    deps = [
+        "@com_github_santhosh_tekuri_jsonschema_v5//:jsonschema",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)
+
+go_library(
+    name = "plan",
+    srcs = ["internal/plan/plan.go"],
+    importpath = "github.com/mindclade/bootstrap/tooling/internal/plan",
+)
+
+go_library(
+    name = "evidence",
+    srcs = ["internal/evidence/evidence.go"],
+    importpath = "github.com/mindclade/bootstrap/tooling/internal/evidence",
+    deps = [
+        ":manifest",
+        ":plan",
+    ],
+)
+
+go_library(
+    name = "recovery",
+    srcs = ["internal/recovery/recovery.go"],
+    importpath = "github.com/mindclade/bootstrap/tooling/internal/recovery",
+    deps = ["@in_gopkg_yaml_v3//:yaml_v3"],
+)
+
+go_binary(
+    name = "bootstrapctl",
+    srcs = ["cmd/bootstrapctl/main.go"],
+    deps = [
+        ":evidence",
+        ":manifest",
+        ":plan",
+        ":recovery",
+    ],
+    visibility = ["//visibility:public"],
+)

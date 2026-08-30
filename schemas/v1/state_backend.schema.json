@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.mindclade.io/bootstrap/v1/state_backend.schema.json",
+  "title": "Mindclade bootstrap state backends",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
+    "kind": {"const": "StateBackendSet"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backends"],
+      "properties": {
+        "backends": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root-trust", "recovery-plane"],
+          "properties": {
+            "root-trust": {"$ref": "#/$defs/backend"},
+            "recovery-plane": {"$ref": "#/$defs/backend"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+    },
+    "envRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valueFrom"],
+      "properties": {
+        "valueFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["env"],
+          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+        }
+      }
+    },
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyName", "protectionLevel"],
+      "properties": {
+        "keyName": {"$ref": "#/$defs/envRef"},
+        "protectionLevel": {"const": "HSM"}
+      }
+    },
+    "replica": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectRef", "bucketName", "location", "encryption"],
+      "properties": {
+        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "bucketName": {"$ref": "#/$defs/envRef"},
+        "location": {"enum": ["us-central1", "us-east4"]},
+        "encryption": {"$ref": "#/$defs/encryption"}
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uniformBucketLevelAccess", "publicAccessPrevention", "versioning", "softDeleteRetentionDays", "deletionProtection", "nativeLocking"],
+      "properties": {
+        "uniformBucketLevelAccess": {"const": true},
+        "publicAccessPrevention": {"const": "enforced"},
+        "versioning": {"const": true},
+        "softDeleteRetentionDays": {"type": "integer", "minimum": 30},
+        "deletionProtection": {"const": true},
+        "nativeLocking": {"const": true}
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectRef", "bucketName", "prefix", "location", "encryption", "replica", "controls"],
+      "properties": {
+        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "bucketName": {"$ref": "#/$defs/envRef"},
+        "prefix": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "location": {"enum": ["us-central1", "us-east4"]},
+        "encryption": {"$ref": "#/$defs/encryption"},
+        "replica": {"$ref": "#/$defs/replica"},
+        "controls": {"$ref": "#/$defs/controls"}
+      }
+    }
+  }
+}
