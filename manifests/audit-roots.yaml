@@ -38,6 +38,16 @@ spec:
       destinationBucketRef: recovery
       includeChildren: true
       filter: log_id("cloudaudit.googleapis.com/activity")
+    data-access:
+      sinkName: bootstrap-data-access
+      destinationBucketRef: primary
+      includeChildren: true
+      filter: log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"
+    data-access-recovery:
+      sinkName: bootstrap-data-access-recovery
+      destinationBucketRef: recovery
+      includeChildren: true
+      filter: log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"
     security-events:
       sinkName: bootstrap-security-events
       destinationBucketRef: primary

@@ -25,7 +25,7 @@ locals {
           active_version_ref      = key.active_version_ref
           activation_window_start = key.versions[key.active_version_ref].activation_window_start
           rotation_deadline       = key.versions[key.active_version_ref].rotation_deadline
-        }
+        } if !contains(var.disabled_signing_keys, key_name)
       ]
     ]) : binding.id => binding
   }

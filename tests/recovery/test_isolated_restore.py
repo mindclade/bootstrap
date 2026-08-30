@@ -118,13 +118,19 @@ class IsolatedRestoreTest(unittest.TestCase):
         self.assertIn('"mode": "isolated-source-simulation"', result.stdout)
         self.assertIn('"status": "source-qualified"', result.stdout)
 
-    def test_workflow_distinguishes_source_simulation_from_connected_evidence(self):
+    def test_workflow_distinguishes_source_simulation_from_nonqualifying_observation(self):
         workflow = (
             self.repository_root / ".github" / "workflows" / "recovery-verification.yml"
         ).read_text(encoding="utf-8")
         self.assertIn('--arg mode "offline-source-simulation"', workflow)
         self.assertIn('--arg result "source-qualified"', workflow)
-        self.assertIn('name: connected-read-only-verification', workflow)
+        self.assertIn('name: non-qualifying-control-observation', workflow)
+        self.assertIn('group: mindclade-ring0-protected', workflow)
+        self.assertIn('mindclade-ring0-ephemeral', workflow)
+        self.assertIn('Verify the expiry-bound two-person observation approval', workflow)
+        self.assertIn('--operation recovery-observation', workflow)
+        self.assertIn('--arg mode "non-qualifying-control-observation"', workflow)
+        self.assertIn('--arg result "observed-not-restored"', workflow)
         self.assertIn('primaryReplicaExportBytesEqual: true', workflow)
         self.assertIn('publicTrustMetadataSha256:', workflow)
         self.assertIn('publicTrustMetadataGeneration:', workflow)
@@ -138,6 +144,7 @@ class IsolatedRestoreTest(unittest.TestCase):
             workflow,
         )
         self.assertNotIn('--arg result "restored"', workflow)
+        self.assertNotIn('name: connected-read-only-verification', workflow)
 
     def test_connected_observation_and_apply_share_one_mutex(self):
         recovery_workflow = (

@@ -47,10 +47,12 @@
         "aggregatedSinks": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["admin-activity", "admin-activity-recovery", "security-events", "security-events-recovery"],
+          "required": ["admin-activity", "admin-activity-recovery", "data-access", "data-access-recovery", "security-events", "security-events-recovery"],
           "properties": {
             "admin-activity": {"$ref": "#/$defs/sink"},
             "admin-activity-recovery": {"$ref": "#/$defs/sink"},
+            "data-access": {"$ref": "#/$defs/sink"},
+            "data-access-recovery": {"$ref": "#/$defs/sink"},
             "security-events": {"$ref": "#/$defs/sink"},
             "security-events-recovery": {"$ref": "#/$defs/sink"}
           }

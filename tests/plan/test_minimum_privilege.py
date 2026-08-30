@@ -284,6 +284,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             for key in (
                 "audit-anchor",
                 "bootstrap-handoff",
+                "github-config-plan-evidence",
+                "infrastructure-export",
                 "recovery-evidence",
             )
         }
@@ -1009,11 +1011,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         principals = {
             "audit-anchor": "serviceAccount:audit-signer@example.iam.gserviceaccount.com",
             "bootstrap-handoff": "serviceAccount:handoff-signer@example.iam.gserviceaccount.com",
+            "github-config-plan-evidence": "serviceAccount:github-config-plan@example.iam.gserviceaccount.com",
             "recovery-evidence": "serviceAccount:recovery-signer@example.iam.gserviceaccount.com",
         }
         for key_name in (
             "audit-anchor",
             "bootstrap-handoff",
+            "github-config-plan-evidence",
+            "infrastructure-export",
             "recovery-evidence",
         ):
             version = self.resource(
@@ -1039,6 +1044,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 )
             }
             resources.append(version)
+
+            if key_name == "infrastructure-export":
+                continue
 
             principal = principals[key_name]
             signer = self.resource(
@@ -1183,6 +1191,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             for key_name in (
                 "audit-anchor",
                 "bootstrap-handoff",
+                "github-config-plan-evidence",
+                "infrastructure-export",
                 "recovery-evidence",
             )
         }
@@ -1218,6 +1228,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                             for key in (
                                 "audit-anchor",
                                 "bootstrap-handoff",
+                                "github-config-plan-evidence",
+                                "infrastructure-export",
                                 "recovery-evidence",
                             )
                         }
@@ -1276,28 +1288,38 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "disabled": False,
                 "attribute_mapping": {
                     "google.subject": "assertion.sub",
+                    "attribute.repo": "assertion.repo",
                     "attribute.repository_id": "assertion.repository_id",
                     "attribute.repository_owner_id": "assertion.repository_owner_id",
                     "attribute.ref": "assertion.ref",
                     "attribute.workflow_ref": "assertion.workflow_ref",
+                    "attribute.workflow_sha": "assertion.workflow_sha",
                     "attribute.environment": "assertion.environment",
+                    "attribute.event_name": "assertion.event_name",
+                    "attribute.repository_visibility": "assertion.repository_visibility",
+                    "attribute.runner_environment": "assertion.runner_environment",
                 },
                 "attribute_condition": " && ".join(
                     [
-                        "assertion.sub == 'repo:mindclade@12345678/bootstrap@987654321:environment:infrastructure-plan'",
-                        "assertion.repository_id == '987654321'",
-                        "assertion.repository_owner_id == '12345678'",
+                        "assertion.sub == 'repo:mindclade@316676129/bootstrap@1350991612:context:environment%3Atrusted-build:workflow_ref:mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main:workflow_sha:' + assertion.workflow_sha",
+                        "assertion.repo == 'mindclade@316676129/bootstrap@1350991612'",
+                        "assertion.repository == 'mindclade/bootstrap'",
+                        "assertion.repository_owner == 'mindclade'",
+                        "assertion.repository_id == '1350991612'",
+                        "assertion.repository_owner_id == '316676129'",
+                        "assertion.repository_visibility == 'private'",
                         "assertion.ref == 'refs/heads/main'",
                         "assertion.workflow_ref == 'mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main'",
-                        "assertion.environment == 'infrastructure-plan'",
+                        "assertion.workflow_sha == assertion.sha",
+                        "assertion.event_name == 'workflow_dispatch'",
+                        "assertion.environment == 'trusted-build'",
+                        "assertion.runner_environment == 'self-hosted'",
                     ]
                 ),
                 "oidc": [
                     {
                         "issuer_uri": "https://token.actions.githubusercontent.com",
-                        "allowed_audiences": [
-                            "https://github.com/mindclade/bootstrap/plan"
-                        ],
+                        "allowed_audiences": ["sts.googleapis.com"],
                     }
                 ],
             },
@@ -1330,7 +1352,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "member": (
                     "principalSet://iam.googleapis.com/projects/123456789/"
                     "locations/global/workloadIdentityPools/bootstrap-github-plan/"
-                    "attribute.repository_id/987654321"
+                    "attribute.repository_id/1350991612"
                 ),
             },
         )
@@ -1339,6 +1361,277 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             'github["plan"]'
         )
         return [identity, state, pool, provider, service_account, binding]
+
+    def ci_evidence_identity_resources(self):
+        identity = self.project_resource("identity", "bootstrap-identity")
+        pool = self.resource(
+            "google_iam_workload_identity_pool",
+            ["create"],
+            {
+                "project": "bootstrap-identity",
+                "workload_identity_pool_id": "github-ci-evidence",
+                "name": (
+                    "projects/123456789/locations/global/workloadIdentityPools/"
+                    "github-ci-evidence"
+                ),
+                "disabled": False,
+            },
+        )
+        pool["address"] = (
+            "module.github_federation.google_iam_workload_identity_pool."
+            'ci_evidence["archive"]'
+        )
+        repository_ids = (
+            "['1350980188', '1350986053', '1350990078', "
+            "'1350991612', '1350991963', '1350992171']"
+        )
+        workflow_sha = "a" * 40
+        recovery_sha = "b" * 40
+        conditions = {
+            "writer": " && ".join(
+                [
+                    "assertion.repository_owner_id == '316676129'",
+                    f"assertion.repository_id in {repository_ids}",
+                    "assertion.repository_visibility in ['internal', 'private']",
+                    "assertion.runner_environment == 'github-hosted'",
+                    (
+                        "assertion.job_workflow_ref == "
+                        "'mindclade/.github/.github/workflows/"
+                        f"reusable-required-check.yml@{workflow_sha}'"
+                    ),
+                    f"assertion.job_workflow_sha == '{workflow_sha}'",
+                    (
+                        "((assertion.event_name == 'push' && "
+                        "assertion.ref == 'refs/heads/main') || "
+                        "(assertion.event_name == 'release' && "
+                        "assertion.ref.startsWith('refs/tags/v')))"
+                    ),
+                ]
+            ),
+            "verifier": " && ".join(
+                [
+                    "assertion.repository_owner_id == '316676129'",
+                    "assertion.repository_id == '1350992171'",
+                    "assertion.repository_visibility in ['internal', 'private']",
+                    "assertion.runner_environment == 'github-hosted'",
+                    (
+                        "assertion.workflow_ref == "
+                        "'mindclade/infrastructure-live/.github/workflows/"
+                        "disaster-recovery.yml@refs/heads/main'"
+                    ),
+                    f"assertion.workflow_sha == '{recovery_sha}'",
+                    "assertion.ref == 'refs/heads/main'",
+                    "assertion.event_name == 'workflow_dispatch'",
+                    "assertion.environment == 'infrastructure-apply'",
+                ]
+            ),
+        }
+        resources = [identity, pool]
+        for role in ("writer", "verifier"):
+            mapping = {
+                "google.subject": "assertion.sub",
+                "attribute.evidence_role": f"'{role}'",
+                "attribute.repository_id": "assertion.repository_id",
+                "attribute.repository_owner_id": "assertion.repository_owner_id",
+                "attribute.ref": "assertion.ref",
+                "attribute.event_name": "assertion.event_name",
+                "attribute.repository_visibility": "assertion.repository_visibility",
+                "attribute.runner_environment": "assertion.runner_environment",
+            }
+            if role == "writer":
+                mapping.update(
+                    {
+                        "attribute.job_workflow_ref": "assertion.job_workflow_ref",
+                        "attribute.job_workflow_sha": "assertion.job_workflow_sha",
+                    }
+                )
+            else:
+                mapping.update(
+                    {
+                        "attribute.workflow_ref": "assertion.workflow_ref",
+                        "attribute.workflow_sha": "assertion.workflow_sha",
+                        "attribute.environment": "assertion.environment",
+                    }
+                )
+            provider = self.resource(
+                "google_iam_workload_identity_pool_provider",
+                ["create"],
+                {
+                    "project": "bootstrap-identity",
+                    "workload_identity_pool_id": "github-ci-evidence",
+                    "workload_identity_pool_provider_id": role,
+                    "disabled": False,
+                    "attribute_mapping": mapping,
+                    "attribute_condition": conditions[role],
+                    "oidc": [
+                        {
+                            "issuer_uri": "https://token.actions.githubusercontent.com",
+                            "allowed_audiences": [],
+                        }
+                    ],
+                },
+            )
+            provider["address"] = (
+                "module.github_federation.google_iam_workload_identity_pool_provider."
+                f'ci_evidence["{role}"]'
+            )
+            account_id = f"ci-evidence-{role}"
+            service_account = self.resource(
+                "google_service_account",
+                ["create"],
+                {
+                    "project": "bootstrap-identity",
+                    "account_id": account_id,
+                    "disabled": False,
+                },
+            )
+            service_account["address"] = (
+                "module.github_federation.google_service_account."
+                f'ci_evidence["{role}"]'
+            )
+            binding = self.resource(
+                "google_service_account_iam_member",
+                ["create"],
+                {
+                    "service_account_id": (
+                        "projects/bootstrap-identity/serviceAccounts/"
+                        f"{account_id}@bootstrap-identity.iam.gserviceaccount.com"
+                    ),
+                    "role": "roles/iam.workloadIdentityUser",
+                    "member": (
+                        "principalSet://iam.googleapis.com/projects/123456789/"
+                        "locations/global/workloadIdentityPools/github-ci-evidence/"
+                        f"attribute.evidence_role/{role}"
+                    ),
+                },
+            )
+            binding["address"] = (
+                "module.github_federation.google_service_account_iam_member."
+                f'ci_evidence["{role}"]'
+            )
+            resources.extend([provider, service_account, binding])
+        return resources
+
+    def infrastructure_identity_resources(self, identity="production-apply"):
+        environment, role = identity.split("-")
+        execution_environment = (
+            "trusted-build" if role == "plan" else "infrastructure-apply"
+        )
+        project = self.project_resource("identity", "bootstrap-identity")
+        pool = self.resource(
+            "google_iam_workload_identity_pool",
+            ["create"],
+            {
+                "project": "bootstrap-identity",
+                "workload_identity_pool_id": "infrastructure-live",
+                "name": (
+                    "projects/123456789/locations/global/workloadIdentityPools/"
+                    "infrastructure-live"
+                ),
+                "disabled": False,
+            },
+        )
+        pool["address"] = (
+            "module.github_federation.google_iam_workload_identity_pool."
+            'infrastructure_live["pool"]'
+        )
+        workflow = (
+            "mindclade/infrastructure-live/.github/workflows/"
+            "protected-apply.yml@refs/heads/main"
+        )
+        immutable_repository = (
+            "mindclade@316676129/infrastructure-live@1350992171"
+        )
+        condition = " && ".join(
+            [
+                (
+                    "assertion.sub == 'repo:"
+                    f"{immutable_repository}:context:environment%3A"
+                    f"{execution_environment}:workflow_ref:{workflow}:workflow_sha:' "
+                    "+ assertion.workflow_sha"
+                ),
+                f"assertion.repo == '{immutable_repository}'",
+                "assertion.repository == 'mindclade/infrastructure-live'",
+                "assertion.repository_owner == 'mindclade'",
+                "assertion.repository_owner_id == '316676129'",
+                "assertion.repository_id == '1350992171'",
+                "assertion.repository_visibility == 'private'",
+                "assertion.ref == 'refs/heads/main'",
+                f"assertion.workflow_ref == '{workflow}'",
+                "assertion.workflow_sha == assertion.sha",
+                "assertion.event_name == 'workflow_dispatch'",
+                f"assertion.environment == '{execution_environment}'",
+                "assertion.runner_environment == 'github-hosted'",
+            ]
+        )
+        provider = self.resource(
+            "google_iam_workload_identity_pool_provider",
+            ["create"],
+            {
+                "project": "bootstrap-identity",
+                "workload_identity_pool_id": "infrastructure-live",
+                "workload_identity_pool_provider_id": identity,
+                "disabled": False,
+                "attribute_mapping": {
+                    "google.subject": "assertion.sub",
+                    "attribute.infrastructure_identity": f"'{identity}'",
+                    "attribute.repo": "assertion.repo",
+                    "attribute.repository_id": "assertion.repository_id",
+                    "attribute.repository_owner_id": "assertion.repository_owner_id",
+                    "attribute.workflow_ref": "assertion.workflow_ref",
+                    "attribute.workflow_sha": "assertion.workflow_sha",
+                    "attribute.environment": "assertion.environment",
+                },
+                "attribute_condition": condition,
+                "oidc": [
+                    {
+                        "issuer_uri": "https://token.actions.githubusercontent.com",
+                        "allowed_audiences": [
+                            "https://github.mindclade.io/oidc/infrastructure-live/"
+                            f"{environment}/{role}"
+                        ],
+                    }
+                ],
+            },
+        )
+        provider["address"] = (
+            "module.github_federation.google_iam_workload_identity_pool_provider."
+            f'infrastructure_live["{identity}"]'
+        )
+        service = self.resource(
+            "google_service_account",
+            ["create"],
+            {
+                "project": "bootstrap-identity",
+                "account_id": identity,
+                "disabled": False,
+            },
+        )
+        service["address"] = (
+            "module.github_federation.google_service_account."
+            f'infrastructure_live["{identity}"]'
+        )
+        binding = self.resource(
+            "google_service_account_iam_member",
+            ["create"],
+            {
+                "service_account_id": (
+                    "projects/bootstrap-identity/serviceAccounts/"
+                    f"{identity}@bootstrap-identity.iam.gserviceaccount.com"
+                ),
+                "role": "roles/iam.workloadIdentityUser",
+                "member": (
+                    "principalSet://iam.googleapis.com/projects/123456789/"
+                    "locations/global/workloadIdentityPools/infrastructure-live/"
+                    f"attribute.infrastructure_identity/{identity}"
+                ),
+            },
+        )
+        binding["address"] = (
+            "module.github_federation.google_service_account_iam_member."
+            f'infrastructure_live["{identity}"]'
+        )
+        return [project, pool, provider, service, binding]
 
     def test_protected_state_resource_is_accepted(self):
         resource = self.resource(
@@ -1455,7 +1748,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             {
                 "org_id": "123456789",
                 "role": "roles/logging.configWriter",
-                "member": "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com",
+                "member": "group:root-trust-administrators@example.com",
             },
         )
         resource["address"] = (
@@ -1757,14 +2050,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
     def test_replication_predefined_roles_are_limited_to_exact_instances(self):
         state_project = self.project_resource("root_state", "bootstrap-state-root")
         approved = {
-            "roles/iam.roleAdmin": (
-                'google_project_iam_member.apply_administration["state:roles/iam.roleAdmin"]'
-            ),
             "roles/iam.roleViewer": (
                 'google_project_iam_member.plan_read["state:roles/iam.roleViewer"]'
-            ),
-            "roles/storagetransfer.user": (
-                'google_project_iam_member.apply_administration["state:roles/storagetransfer.user"]'
             ),
             "roles/storagetransfer.viewer": (
                 'google_project_iam_member.plan_read["state:roles/storagetransfer.viewer"]'
@@ -1798,6 +2085,27 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 result = self.check_plan([state_project, resource])
                 self.assertNotEqual(result.returncode, 0)
 
+        for role in ("roles/iam.roleAdmin", "roles/storagetransfer.user"):
+            with self.subTest(role=role, standing_apply=True):
+                resource = self.resource(
+                    "google_project_iam_member",
+                    ["create"],
+                    {
+                        "project": "bootstrap-state-root",
+                        "role": role,
+                        "member": (
+                            "serviceAccount:bootstrap-apply@bootstrap-state-root."
+                            "iam.gserviceaccount.com"
+                        ),
+                    },
+                )
+                resource["address"] = (
+                    f'google_project_iam_member.apply_administration["state:{role}"]'
+                )
+                result = self.check_plan([state_project, resource])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("outside", result.stderr)
+
     def test_every_compiler_declared_apply_and_plan_project_role_is_accepted(self):
         administration = {
             "identity": (
@@ -1806,35 +2114,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "roles/resourcemanager.projectIamAdmin",
                 "roles/serviceusage.serviceUsageAdmin",
             ),
-            "state": (
-                "roles/cloudkms.admin",
-                "roles/iam.roleAdmin",
-                "roles/iam.serviceAccountAdmin",
-                "roles/privilegedaccessmanager.admin",
-                "roles/resourcemanager.projectIamAdmin",
-                "roles/serviceusage.serviceUsageAdmin",
-                "roles/storage.admin",
-                "roles/storagetransfer.user",
-            ),
-            "recovery": (
-                "roles/cloudkms.admin",
-                "roles/iam.roleAdmin",
-                "roles/iam.serviceAccountAdmin",
-                "roles/logging.configWriter",
-                "roles/privilegedaccessmanager.admin",
-                "roles/resourcemanager.projectIamAdmin",
-                "roles/serviceusage.serviceUsageAdmin",
-                "roles/storage.admin",
-                "roles/storagetransfer.user",
-            ),
             "audit": (
                 "roles/cloudkms.admin",
-                "roles/resourcemanager.projectIamAdmin",
-                "roles/serviceusage.serviceUsageAdmin",
-            ),
-            "signing": (
-                "roles/cloudkms.admin",
-                "roles/privilegedaccessmanager.admin",
                 "roles/resourcemanager.projectIamAdmin",
                 "roles/serviceusage.serviceUsageAdmin",
             ),
@@ -2976,14 +3257,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_versions_and_time_scoped_signers_are_exact(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "recovery-evidence"):
-            resources.extend(
-                [
-                    self.signing_crypto_key(key),
-                    self.signing_version(key),
-                    self.signing_binding(key),
-                ]
-            )
+        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+            resources.extend([self.signing_crypto_key(key), self.signing_version(key)])
+            if key != "infrastructure-export":
+                resources.append(self.signing_binding(key))
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -3072,7 +3349,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_allows_prestage_then_concrete_activation(self):
         prestage_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "recovery-evidence"):
+        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
             prestage_resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"]),
@@ -3090,7 +3367,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         activation_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "recovery-evidence"):
+        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
             activation_resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"], state="DISABLED"),
@@ -3121,7 +3398,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_rejects_undeclared_gap_and_window_mutation(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "recovery-evidence"):
+        for key in ("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
             resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"]),
@@ -3313,14 +3590,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("active version metadata", result.stderr)
 
-    def test_apply_logging_is_config_writer_not_logging_admin(self):
+    def test_root_administrator_logging_is_config_writer_not_logging_admin(self):
         resource = self.resource(
             "google_organization_iam_member",
             ["create"],
             {
                 "org_id": "123456789",
                 "role": "roles/logging.configWriter",
-                "member": "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com",
+                "member": "group:root-trust-administrators@example.com",
             },
         )
         resource["address"] = (
@@ -3328,6 +3605,17 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         )
         result = self.check_plan([resource])
         self.assertEqual(result.returncode, 0, result.stderr)
+
+        resource["change"]["after"]["member"] = (
+            "serviceAccount:bootstrap-apply@bootstrap-state-root."
+            "iam.gserviceaccount.com"
+        )
+        result = self.check_plan([resource])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("never bootstrap-apply", result.stderr)
+        resource["change"]["after"]["member"] = (
+            "group:root-trust-administrators@example.com"
+        )
 
         resource["change"]["after"]["role"] = "roles/logging.admin"
         result = self.check_plan([resource])
@@ -3403,7 +3691,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "attribute_condition": provider["change"]["after"][
                             "attribute_condition"
                         ].replace(
-                            "assertion.repository_id == '987654321'",
+                            "assertion.repository_id == '1350991612'",
                             "assertion.repository_id != ''",
                         )
                     }
@@ -3416,7 +3704,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "attribute_condition": provider["change"]["after"][
                             "attribute_condition"
                         ].replace(
-                            "assertion.repository_id == '987654321'",
+                            "assertion.repository_id == '1350991612'",
                             "assertion.repository_id.startsWith('987')",
                         )
                     }
@@ -3428,7 +3716,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     {
                         "attribute_condition": provider["change"]["after"][
                             "attribute_condition"
-                        ].replace("987654321", "*", 1)
+                        ].replace("1350991612", "*", 1)
                     }
                 ),
             ),
@@ -3443,7 +3731,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 lambda provider, binding: binding["change"]["after"].update(
                     {
                         "member": binding["change"]["after"]["member"].replace(
-                            "987654321", "111111111"
+                            "1350991612", "111111111"
                         )
                     }
                 ),
@@ -3457,6 +3745,142 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 mutate(provider, binding)
                 result = self.check_plan(resources)
                 self.assertNotEqual(result.returncode, 0)
+
+    def test_ci_evidence_provider_claims_and_role_separation_are_exact(self):
+        resources = self.ci_evidence_identity_resources()
+        result = self.check_plan(resources)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        mutations = (
+            (
+                "arbitrary-audience",
+                lambda writer, writer_binding, verifier: writer["change"]["after"]
+                ["oidc"][0].update(
+                    {"allowed_audiences": ["https://attacker.example/audience"]}
+                ),
+            ),
+            (
+                "repository-allowlist",
+                lambda writer, writer_binding, verifier: writer["change"]["after"].update(
+                    {
+                        "attribute_condition": writer["change"]["after"][
+                            "attribute_condition"
+                        ].replace(", '1350992171'", "")
+                    }
+                ),
+            ),
+            (
+                "mutable-central-workflow",
+                lambda writer, writer_binding, verifier: writer["change"]["after"].update(
+                    {
+                        "attribute_condition": writer["change"]["after"][
+                            "attribute_condition"
+                        ].replace("@" + "a" * 40, "@main", 1)
+                    }
+                ),
+            ),
+            (
+                "workflow-sha-mismatch",
+                lambda writer, writer_binding, verifier: writer["change"]["after"].update(
+                    {
+                        "attribute_condition": writer["change"]["after"][
+                            "attribute_condition"
+                        ].replace(
+                            "assertion.job_workflow_sha == '" + "a" * 40 + "'",
+                            "assertion.job_workflow_sha == '" + "c" * 40 + "'",
+                        )
+                    }
+                ),
+            ),
+            (
+                "release-tag-prefix",
+                lambda writer, writer_binding, verifier: writer["change"]["after"].update(
+                    {
+                        "attribute_condition": writer["change"]["after"][
+                            "attribute_condition"
+                        ].replace("refs/tags/v", "refs/tags/")
+                    }
+                ),
+            ),
+            (
+                "provider-role",
+                lambda writer, writer_binding, verifier: writer["change"]["after"][
+                    "attribute_mapping"
+                ].update({"attribute.evidence_role": "'verifier'"}),
+            ),
+            (
+                "principal-role",
+                lambda writer, writer_binding, verifier: writer_binding["change"][
+                    "after"
+                ].update(
+                    {
+                        "member": writer_binding["change"]["after"]["member"].replace(
+                            "/writer", "/verifier"
+                        )
+                    }
+                ),
+            ),
+            (
+                "verifier-workflow",
+                lambda writer, writer_binding, verifier: verifier["change"]["after"].update(
+                    {
+                        "attribute_condition": verifier["change"]["after"][
+                            "attribute_condition"
+                        ].replace("@refs/heads/main", "@refs/heads/development")
+                    }
+                ),
+            ),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                resources = self.ci_evidence_identity_resources()
+                mutate(resources[2], resources[4], resources[5])
+                result = self.check_plan(resources)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_infrastructure_live_subjects_and_eight_audiences_are_exact(self):
+        for identity in (
+            "development-plan",
+            "development-apply",
+            "staging-plan",
+            "staging-apply",
+            "production-plan",
+            "production-apply",
+            "restricted-plan",
+            "restricted-apply",
+        ):
+            with self.subTest(identity=identity):
+                resources = self.infrastructure_identity_resources(identity)
+                result = self.check_plan(resources)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+        mutations = (
+            lambda provider, binding: provider["change"]["after"]["oidc"][0].update(
+                {"allowed_audiences": ["sts.googleapis.com"]}
+            ),
+            lambda provider, binding: provider["change"]["after"].update(
+                {
+                    "attribute_condition": provider["change"]["after"][
+                        "attribute_condition"
+                    ].replace("assertion.workflow_sha == assertion.sha", "true")
+                }
+            ),
+            lambda provider, binding: provider["change"]["after"].update(
+                {
+                    "attribute_condition": provider["change"]["after"][
+                        "attribute_condition"
+                    ].replace("repository_visibility == 'private'", "repository_visibility != 'public'")
+                }
+            ),
+            lambda provider, binding: binding["change"]["after"].update(
+                {"member": binding["change"]["after"]["member"].replace("production-apply", "production-plan")}
+            ),
+        )
+        for mutate in mutations:
+            resources = self.infrastructure_identity_resources()
+            mutate(resources[2], resources[4])
+            result = self.check_plan(resources)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_buildkite_and_gitops_subject_claims_are_exact(self):
         identity = self.project_resource("identity", "bootstrap-identity")
@@ -3790,7 +4214,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             {
                 "org_id": "123456789",
                 "role_id": "bootstrapRecoverySinkRead",
-                "permissions": ["logging.sinks.get"],
+                "permissions": [
+                    "logging.sinks.get",
+                    "resourcemanager.organizations.getIamPolicy",
+                ],
                 "stage": "GA",
             },
         )
@@ -3830,14 +4257,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             (
                 "google_organization_iam_member.apply_iam",
                 "organizations/123456789/roles/bootstrapOrganizationIamApply",
-                "serviceAccount:bootstrap-apply@bootstrap-state-root."
-                "iam.gserviceaccount.com",
+                "group:root-trust-administrators@example.com",
             ),
             (
                 "google_organization_iam_member.apply_organization_role_admin",
                 "roles/iam.organizationRoleAdmin",
-                "serviceAccount:bootstrap-apply@bootstrap-state-root."
-                "iam.gserviceaccount.com",
+                "group:root-trust-administrators@example.com",
             ),
         ):
             binding = self.resource(

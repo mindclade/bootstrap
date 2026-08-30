@@ -71,7 +71,7 @@ validate-tofu:
       done
 
 lint-ci:
-    actionlint .github/workflows/*.yml
+    actionlint -ignore 'label "mindclade-ring0-ephemeral" is unknown' .github/workflows/*.yml
 
 test-go:
     cd tooling && go test ./... && go vet ./...
@@ -84,11 +84,13 @@ test-python:
       tests/recovery/test_isolated_restore.py
 
 test-bazel:
-    USE_BAZEL_VERSION=9.1.1 bazel test //...
+    USE_BAZEL_VERSION=9.1.1 bazel test --lockfile_mode=off //...
 
 test: test-go test-python test-bazel
 
 validate: fmt-check validate-manifests validate-policy validate-tofu lint-ci test
+
+ci: validate
 
 plan-check root plan_json:
     @case "{{ plan_json }}" in /*) plan_path="{{ plan_json }}" ;; *) plan_path="{{ repo_root }}/{{ plan_json }}" ;; esac; \

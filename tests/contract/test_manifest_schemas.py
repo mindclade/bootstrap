@@ -115,15 +115,20 @@ def valid_render_values():
         "GCP_RECOVERY_ROOT_PROJECT_ID": "mindclade-recovery-root",
         "GCP_SIGNING_ROOT_PROJECT_ID": "mindclade-signing-root",
         "GCP_STATE_ROOT_PROJECT_ID": "mindclade-state-root",
-        "GITHUB_APPLY_WORKFLOW_REF": "mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main",
-        "GITHUB_OIDC_AUDIENCE": "https://github.com/mindclade/bootstrap",
+        "GITHUB_CI_EVIDENCE_JOB_WORKFLOW_REF": (
+            "mindclade/.github/.github/workflows/reusable-required-check.yml@" + "a" * 40
+        ),
         "GITHUB_OIDC_ISSUER_URI": "https://token.actions.githubusercontent.com",
-        "GITHUB_REPOSITORY_ID": "987654321",
-        "GITHUB_REPOSITORY_OWNER_ID": "12345678",
+        "GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER": "serviceAccount:github-config-plan@mindclade-identity-root.iam.gserviceaccount.com",
         "GITOPS_IMMUTABLE_SUBJECT": "repo:mindclade/platform-gitops:ref:refs/heads/main",
         "GITOPS_OIDC_AUDIENCE": "https://gitops.example.com/mindclade/bootstrap",
         "GITOPS_OIDC_ISSUER_URI": "https://gitops.example.com",
         "GITOPS_REPOSITORY": "mindclade/platform-gitops",
+        "INFRASTRUCTURE_LIVE_DISASTER_RECOVERY_WORKFLOW_SHA": "b" * 40,
+        "INFRASTRUCTURE_DEVELOPMENT_EXPORT_SIGNER": "serviceAccount:development-apply@mindclade-identity-root.iam.gserviceaccount.com",
+        "INFRASTRUCTURE_STAGING_EXPORT_SIGNER": "serviceAccount:staging-apply@mindclade-identity-root.iam.gserviceaccount.com",
+        "INFRASTRUCTURE_PRODUCTION_EXPORT_SIGNER": "serviceAccount:production-apply@mindclade-identity-root.iam.gserviceaccount.com",
+        "INFRASTRUCTURE_RESTRICTED_EXPORT_SIGNER": "serviceAccount:restricted-apply@mindclade-identity-root.iam.gserviceaccount.com",
         "KMS_ADMIN_PRINCIPAL_1": "group:kms-administrators@example.com",
         "KMS_ADMIN_PRINCIPAL_2": "group:kms-security@example.com",
         "RECOVERY_ADMIN_GROUP": "group:recovery-administrators@example.com",
@@ -148,7 +153,6 @@ def valid_render_values():
 def valid_recovery_context(values):
     project_number = "123456789012"
     provider_prefix = f"projects/{project_number}/locations/global/workloadIdentityPools"
-    audience = values["GITHUB_OIDC_AUDIENCE"].rstrip("/")
     return {
         "federation": {
             "github": {
@@ -157,7 +161,7 @@ def valid_recovery_context(values):
                     for role in ("plan", "apply", "recovery")
                 },
                 "audiences": {
-                    role: f"{audience}/{role}"
+                    role: "sts.googleapis.com"
                     for role in ("plan", "apply", "recovery")
                 },
             },
@@ -193,7 +197,13 @@ def valid_recovery_context(values):
                     f"keyRings/bootstrap-signing/cryptoKeys/{name}/cryptoKeyVersions/1"
                 )
             }
-            for name in ("audit-anchor", "bootstrap-handoff", "recovery-evidence")
+            for name in (
+                "audit-anchor",
+                "bootstrap-handoff",
+                "github-config-plan-evidence",
+                "infrastructure-export",
+                "recovery-evidence",
+            )
         },
     }
 
@@ -288,6 +298,47 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertFalse(schema.get("additionalProperties", True), path.name)
             self.assertEqual(schema.get("type"), "object", path.name)
 
+    def test_ci_evidence_extension_is_additive_within_federation_v1(self):
+        schema = json.loads(
+            (self.repository_root / "schemas" / "v1" / "federation.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        providers = schema["properties"]["spec"]["properties"][
+            "workloadIdentityProviders"
+        ]
+        self.assertIn("github-ci-evidence", providers["properties"])
+        self.assertIn("github-ci-evidence", providers["required"])
+        self.assertIn("github-config", providers["properties"])
+        self.assertIn("github-config", providers["required"])
+        self.assertIn("github-infrastructure", providers["properties"])
+        self.assertIn("github-infrastructure", providers["required"])
+
+    def test_recovery_and_infrastructure_federation_boundaries_are_separated(self):
+        module = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "main.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "pool_project_id    = var.service_account_project_ids.recovery", module
+        )
+        self.assertIn("project                   = each.value.pool_project_id", module)
+        self.assertIn(
+            'resource "google_iam_workload_identity_pool" "infrastructure_live"',
+            module,
+        )
+        self.assertIn(
+            '"assertion.workflow_sha == assertion.sha"', module
+        )
+        self.assertIn(
+            '"assertion.repository_visibility == \'private\'"', module
+        )
+        self.assertIn("allowed_audiences = [each.value.audience]", module)
+        self.assertIn('allowed_audiences = ["sts.googleapis.com"]', module)
+
     def test_provider_packages_are_installed_only_from_exact_hash_verified_mirrors(self):
         linux_amd64 = "zh:5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
         darwin_arm64 = "zh:f028a366d9c7f427d3ed1a34df22c4476b6ebed4e8884b23e448ef1fb170eb44"
@@ -352,6 +403,51 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertIn("Move the generated recovery credentials outside the source tree", recovery)
         self.assertIn("GOOGLE_GHA_CREDS_PATH", recovery)
 
+    def test_ci_evidence_federation_is_disabled_isolated_and_keyless(self):
+        module = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "main.tf"
+        ).read_text(encoding="utf-8")
+        variables = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "variables.tf"
+        ).read_text(encoding="utf-8")
+        manifest = (
+            self.repository_root / "manifests" / "identity-federation.yaml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("activationEnabled: false", manifest)
+        self.assertIn('pool_id == "github-ci-evidence"', variables)
+        self.assertIn('resource "google_iam_workload_identity_pool" "ci_evidence"', module)
+        self.assertIn(
+            "var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}",
+            module,
+        )
+        self.assertIn('"attribute.evidence_role"', module)
+        self.assertIn("/attribute.evidence_role/${each.key}", module)
+        self.assertIn("assertion.job_workflow_ref ==", module)
+        self.assertIn("assertion.job_workflow_sha ==", module)
+        self.assertIn("assertion.workflow_sha ==", module)
+        self.assertIn("assertion.repository_visibility in ['internal', 'private']", module)
+        self.assertIn("assertion.runner_environment == 'github-hosted'", module)
+        self.assertIn("Omitting allowed_audiences", module)
+        self.assertNotIn("var.ci_evidence.writer.audience", module)
+        self.assertNotIn("var.ci_evidence.verifier.audience", module)
+        outputs = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "outputs.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn('key => "https://iam.googleapis.com/${provider.name}"', outputs)
+        self.assertNotIn("google_service_account_key", module)
+
     def test_protected_apply_binds_backend_and_saved_plan_source_exactly(self):
         workflow = (
             self.repository_root / ".github" / "workflows" / "protected-apply.yml"
@@ -401,6 +497,18 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "contents: read only",
             ),
             (
+                ".github/workflows/protected-apply.yml",
+                "    environment: trusted-build\n",
+                "    environment: unapproved-plan\n",
+                "job plan must use environment trusted-build",
+            ),
+            (
+                ".github/workflows/recovery-verification.yml",
+                "    environment: infrastructure-apply\n",
+                "    environment: unapproved-recovery\n",
+                "job observation must use environment infrastructure-apply",
+            ),
+            (
                 ".github/workflows/recovery-verification.yml",
                 "5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8",
                 "0dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8",
@@ -414,7 +522,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
             ),
             (
                 ".github/workflows/recovery-verification.yml",
-                "if: github.event_name == 'workflow_dispatch' && inputs.connected",
+                "if: github.event_name == 'workflow_dispatch' && inputs.observe_controls",
                 "if: always()",
                 "manual-only",
             ),
@@ -422,13 +530,13 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 ".github/workflows/recovery-verification.yml",
                 "and ((.exclusions // []) == [])",
                 "and true",
-                "four exact enabled, exclusion-free",
+                "six exact enabled, exclusion-free",
             ),
             (
                 ".github/workflows/recovery-verification.yml",
-                "path: ${{ runner.temp }}/connected-evidence/",
+                "path: ${{ runner.temp }}/observation-evidence/",
                 "path: ${{ runner.temp }}/recovery-inventory/",
-                "only the exact redacted signed bundle",
+                "explicitly non-qualifying redacted signed bundle",
             ),
             (
                 ".github/workflows/recovery-verification.yml",
@@ -631,24 +739,65 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("symlinks=[manifests/trust-anchors.yaml]", result.stderr)
 
-    def test_component_maturity_contract_fails_closed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            clone = Path(directory) / "bootstrap"
-            shutil.copytree(
-                self.repository_root,
-                clone,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".terraform", ".terraform.lock.hcl", "bazel-*", "__pycache__"
-                ),
-            )
-            path = clone / "component.yaml"
-            content = path.read_text(encoding="utf-8").replace(
-                "maturity: production", "maturity: experimental"
-            )
-            path.write_text(content, encoding="utf-8")
-            result = self.validate(clone)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("owner/maturity/authority contract is invalid", result.stderr)
+    def test_component_readiness_contract_fails_closed(self):
+        cases = (
+            (
+                "maturity: pre-production",
+                "maturity: production",
+                "owner/readiness/authority contract is invalid",
+            ),
+            (
+                "production_authority: false",
+                "production_authority: true",
+                "owner/readiness/authority contract is invalid",
+            ),
+            (
+                "owner: security",
+                "owner: platform-operations",
+                "owner/readiness/authority contract is invalid",
+            ),
+            (
+                "trust_tier: ring-0",
+                "trust_tier: ordinary",
+                "owner/readiness/authority contract is invalid",
+            ),
+            (
+                "recovery_tier: isolated-ring-0",
+                "recovery_tier: routine",
+                "owner/readiness/authority contract is invalid",
+            ),
+            (
+                "    - platform-operations",
+                "    - security",
+                "dependency/ownership contract is invalid",
+            ),
+            (
+                "mindclade.dev/trust-tier: ring-0",
+                "mindclade.dev/trust-tier: ordinary",
+                "metadata contract is incomplete",
+            ),
+            (
+                "mindclade.dev/recovery-tier: isolated-ring-0",
+                "mindclade.dev/recovery-tier: routine",
+                "metadata contract is incomplete",
+            ),
+        )
+        for original, replacement, error in cases:
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
+                clone = Path(directory) / "bootstrap"
+                shutil.copytree(
+                    self.repository_root,
+                    clone,
+                    ignore=shutil.ignore_patterns(
+                        ".git", ".terraform", ".terraform.lock.hcl", "bazel-*", "__pycache__"
+                    ),
+                )
+                path = clone / "component.yaml"
+                content = path.read_text(encoding="utf-8").replace(original, replacement)
+                path.write_text(content, encoding="utf-8")
+                result = self.validate(clone)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
 
     def test_audit_lock_requires_bound_qualification_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -716,6 +865,10 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertEqual(set(first_payload), {"bootstrap"})
             self.assertIsInstance(first_payload["bootstrap"], dict)
             self.assertEqual(
+                first_payload["bootstrap"]["root_administrator_principal"],
+                values["ROOT_TRUST_ADMIN_GROUP"],
+            )
+            self.assertEqual(
                 first_payload["bootstrap"]["recovery_administrator_principal"],
                 values["RECOVERY_ADMIN_GROUP"],
             )
@@ -723,6 +876,91 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertEqual(
                 first_payload["bootstrap"]["buildkite"]["step_key"],
                 "bootstrap-ring0-signing",
+            )
+            ci_evidence = first_payload["bootstrap"]["github_ci_evidence"]
+            self.assertFalse(ci_evidence["activation_enabled"])
+            self.assertEqual(ci_evidence["pool_id"], "github-ci-evidence")
+            self.assertEqual(ci_evidence["repository_owner_id"], "316676129")
+            self.assertEqual(
+                ci_evidence["repository_ids"],
+                {
+                    "bootstrap": "1350991612",
+                    "dot-github": "1350980188",
+                    "github-config": "1350986053",
+                    "gitops": "1350991963",
+                    "infrastructure-live": "1350992171",
+                    "mindclade": "1350990078",
+                },
+            )
+            self.assertEqual(
+                ci_evidence["writer"]["job_workflow_ref"],
+                values["GITHUB_CI_EVIDENCE_JOB_WORKFLOW_REF"],
+            )
+            self.assertEqual(
+                ci_evidence["verifier"]["workflow_sha"],
+                values["INFRASTRUCTURE_LIVE_DISASTER_RECOVERY_WORKFLOW_SHA"],
+            )
+            self.assertNotEqual(
+                ci_evidence["writer"]["service_account_id"],
+                ci_evidence["verifier"]["service_account_id"],
+            )
+            github_config = first_payload["bootstrap"]["github_config"]
+            self.assertFalse(github_config["activation_enabled"])
+            self.assertEqual(github_config["pool_id"], "github-config")
+            self.assertEqual(
+                {
+                    subject["id"]
+                    for identity in github_config["identities"].values()
+                    for subject in identity["subjects"]
+                },
+                {
+                    "github-config-drift-plan",
+                    "github-config-protected-plan",
+                    "github-config-protected-apply",
+                },
+            )
+            infrastructure = first_payload["bootstrap"]["github_infrastructure"]
+            expected_identities = {
+                f"{environment}-{role}"
+                for environment in (
+                    "development",
+                    "staging",
+                    "production",
+                    "restricted",
+                )
+                for role in ("plan", "apply")
+            }
+            self.assertEqual(set(infrastructure["identities"]), expected_identities)
+            self.assertEqual(infrastructure["pool_id"], "infrastructure-live")
+            self.assertEqual(infrastructure["repository_owner_id"], "316676129")
+            self.assertEqual(infrastructure["repository_id"], "1350992171")
+            self.assertEqual(
+                infrastructure["drift"],
+                {
+                    "activation_enabled": False,
+                    "subject_id": "infrastructure-drift-plan",
+                    "provider_id": "infrastructure-plan",
+                    "service_account_id": "infrastructure-plan",
+                    "workflow_ref": "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main",
+                    "environment": "trusted-build",
+                    "audience": "sts.googleapis.com",
+                },
+            )
+            self.assertEqual(
+                {
+                    identity["audience"]
+                    for identity in infrastructure["identities"].values()
+                },
+                {
+                    f"https://github.mindclade.io/oidc/infrastructure-live/{environment}/{role}"
+                    for environment in (
+                        "development",
+                        "staging",
+                        "production",
+                        "restricted",
+                    )
+                    for role in ("plan", "apply")
+                },
             )
             self.assertNotIn("WORKFORCE_OIDC_CLIENT_SECRET", first_bytes.decode("utf-8"))
             self.assertNotIn("client_secret", first_payload["bootstrap"]["workforce"])
@@ -743,6 +981,56 @@ class ManifestSchemaContractTest(unittest.TestCase):
                     }
                 },
             )
+            self.assertEqual(
+                set(first_payload["bootstrap"]["signing"]["keys"]),
+                {
+                    "audit-anchor",
+                    "bootstrap-handoff",
+                    "github-config-plan-evidence",
+                    "infrastructure-export",
+                    "recovery-evidence",
+                },
+            )
+            activation = first_payload["bootstrap"]["github_activation"]
+            self.assertEqual(activation["state"], "blocked")
+            self.assertEqual(len(activation["active_subject_ids"]), 11)
+            self.assertEqual(len(activation["gated_subject_ids"]), 5)
+            self.assertEqual(
+                set(activation["active_subject_ids"])
+                | set(activation["gated_subject_ids"]),
+                {
+                    "github-config-drift-plan",
+                    "github-config-protected-plan",
+                    "github-config-protected-apply",
+                    "bootstrap-protected-plan",
+                    "bootstrap-protected-apply",
+                    "bootstrap-recovery-verification",
+                    "infrastructure-drift-plan",
+                    "infrastructure-ci-evidence-verifier",
+                    *{
+                        f"infrastructure-live-{environment}-{role}"
+                        for environment in (
+                            "development",
+                            "staging",
+                            "production",
+                            "restricted",
+                        )
+                        for role in ("plan", "apply")
+                    },
+                },
+            )
+            signing_outputs = (
+                self.repository_root
+                / "opentofu"
+                / "modules"
+                / "signing-root"
+                / "outputs.tf"
+            ).read_text(encoding="utf-8")
+            self.assertIn("public_key_pem", signing_outputs)
+            self.assertIn("public_key_pem_sha256", signing_outputs)
+            self.assertNotIn("public_key_sha256", signing_outputs)
+            self.assertIn('protection_level = "HSM"', signing_outputs)
+            self.assertIn("sha256(", signing_outputs)
             self.assertEqual(first_output.stat().st_mode & 0o777, 0o600)
 
             reversed_values = dict(reversed(list(values.items())))
@@ -848,6 +1136,22 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 result, output = self.render_root(directory, values)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Buildkite", result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_root_trust_render_rejects_mutable_ci_evidence_workflows(self):
+        invalid_values = {
+            "GITHUB_CI_EVIDENCE_JOB_WORKFLOW_REF": (
+                "mindclade/.github/.github/workflows/reusable-required-check.yml@main"
+            ),
+            "INFRASTRUCTURE_LIVE_DISASTER_RECOVERY_WORKFLOW_SHA": "main",
+        }
+        for name, invalid_value in invalid_values.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                values = valid_render_values()
+                values[name] = invalid_value
+                result, output = self.render_root(directory, values)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("CI evidence", result.stderr)
                 self.assertFalse(output.exists())
 
     def test_root_trust_render_requires_canonical_iam_principals(self):

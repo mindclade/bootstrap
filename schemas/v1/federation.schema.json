@@ -12,13 +12,13 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["workforce", "workloadIdentityProviders"],
+      "required": ["workforce", "workloadIdentityProviders", "activation"],
       "properties": {
         "workforce": {"$ref": "#/$defs/workforce"},
         "workloadIdentityProviders": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["github", "buildkite", "gitops"],
+          "required": ["github", "github-config", "github-infrastructure", "github-ci-evidence", "buildkite", "gitops"],
           "properties": {
             "github": {
               "allOf": [
@@ -39,6 +39,150 @@
                   }
                 }
               ]
+            },
+            "github-ci-evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "projectRef",
+                "activationEnabled",
+                "poolId",
+                "issuerUri",
+                "subjectClaim",
+                "repositoryOwnerId",
+                "repositoryIds",
+                "writer",
+                "verifier"
+              ],
+              "properties": {
+                "platform": {"const": "github"},
+                "projectRef": {"const": "identity-root"},
+                "activationEnabled": {"const": false},
+                "poolId": {"const": "github-ci-evidence"},
+                "issuerUri": {"$ref": "#/$defs/envRef"},
+                "subjectClaim": {"const": "assertion.sub"},
+                "repositoryOwnerId": {"$ref": "#/$defs/expectedValue"},
+                "repositoryIds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "bootstrap",
+                    "dot-github",
+                    "github-config",
+                    "gitops",
+                    "infrastructure-live",
+                    "mindclade"
+                  ],
+                  "properties": {
+                    "bootstrap": {"$ref": "#/$defs/expectedValue"},
+                    "dot-github": {"$ref": "#/$defs/expectedValue"},
+                    "github-config": {"$ref": "#/$defs/expectedValue"},
+                    "gitops": {"$ref": "#/$defs/expectedValue"},
+                    "infrastructure-live": {"$ref": "#/$defs/expectedValue"},
+                    "mindclade": {"$ref": "#/$defs/expectedValue"}
+                  }
+                },
+                "writer": {"$ref": "#/$defs/ciEvidenceWriter"},
+                "verifier": {"$ref": "#/$defs/ciEvidenceVerifier"}
+              }
+            },
+            "github-config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "projectRef",
+                "activationEnabled",
+                "poolId",
+                "issuerUri",
+                "subjectClaim",
+                "repositoryOwnerId",
+                "repositoryId",
+                "immutableRepository",
+                "repositoryFullName",
+                "branchRef",
+                "identities"
+              ],
+              "properties": {
+                "platform": {"const": "github"},
+                "projectRef": {"const": "identity-root"},
+                "activationEnabled": {"const": false},
+                "poolId": {"const": "github-config"},
+                "issuerUri": {"$ref": "#/$defs/envRef"},
+                "subjectClaim": {"const": "assertion.sub"},
+                "repositoryOwnerId": {"$ref": "#/$defs/expectedValue"},
+                "repositoryId": {"$ref": "#/$defs/expectedValue"},
+                "immutableRepository": {"$ref": "#/$defs/expectedValue"},
+                "repositoryFullName": {"$ref": "#/$defs/expectedValue"},
+                "branchRef": {"$ref": "#/$defs/expectedValue"},
+                "identities": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["plan", "apply"],
+                  "properties": {
+                    "plan": {"$ref": "#/$defs/githubConfigIdentity"},
+                    "apply": {"$ref": "#/$defs/githubConfigIdentity"}
+                  }
+                }
+              }
+            },
+            "github-infrastructure": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "projectRef",
+                "poolId",
+                "issuerUri",
+                "subjectClaim",
+                "repositoryOwnerId",
+                "repositoryId",
+                "immutableRepository",
+                "repositoryFullName",
+                "branchRef",
+                "workflowRef",
+                "drift",
+                "identities"
+              ],
+              "properties": {
+                "platform": {"const": "github"},
+                "projectRef": {"const": "identity-root"},
+                "poolId": {"const": "infrastructure-live"},
+                "issuerUri": {"$ref": "#/$defs/envRef"},
+                "subjectClaim": {"const": "assertion.sub"},
+                "repositoryOwnerId": {"$ref": "#/$defs/expectedValue"},
+                "repositoryId": {"$ref": "#/$defs/expectedValue"},
+                "immutableRepository": {"$ref": "#/$defs/expectedValue"},
+                "repositoryFullName": {"$ref": "#/$defs/expectedValue"},
+                "branchRef": {"$ref": "#/$defs/expectedValue"},
+                "workflowRef": {"$ref": "#/$defs/expectedValue"},
+                "drift": {"$ref": "#/$defs/infrastructureDriftIdentity"},
+                "identities": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "development-plan",
+                    "development-apply",
+                    "staging-plan",
+                    "staging-apply",
+                    "production-plan",
+                    "production-apply",
+                    "restricted-plan",
+                    "restricted-apply"
+                  ],
+                  "properties": {
+                    "development-plan": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "development-apply": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "staging-plan": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "staging-apply": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "production-plan": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "production-apply": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "restricted-plan": {"$ref": "#/$defs/infrastructureIdentity"},
+                    "restricted-apply": {"$ref": "#/$defs/infrastructureIdentity"}
+                  }
+                }
+              }
             },
             "buildkite": {
               "allOf": [
@@ -81,7 +225,8 @@
               ]
             }
           }
-        }
+        },
+        "activation": {"$ref": "#/$defs/federationActivation"}
       }
     }
   },
@@ -160,6 +305,98 @@
         }
       }
     },
+    "ciEvidenceWriter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "jobWorkflowRef", "allowedEvents", "branchRef", "releaseTagPrefix", "serviceAccount"],
+      "properties": {
+        "providerId": {"const": "writer"},
+        "jobWorkflowRef": {"$ref": "#/$defs/envRef"},
+        "allowedEvents": {
+          "type": "array",
+          "prefixItems": [{"const": "push"}, {"const": "release"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "branchRef": {"const": "refs/heads/main"},
+        "releaseTagPrefix": {"const": "refs/tags/v"},
+        "serviceAccount": {"$ref": "#/$defs/serviceAccount"}
+      }
+    },
+    "infrastructureIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "environment", "allowedAudience", "serviceAccount"],
+      "properties": {
+        "providerId": {"type": "string", "pattern": "^(development|staging|production|restricted)-(plan|apply)$"},
+        "environment": {"enum": ["trusted-build", "infrastructure-apply"]},
+        "allowedAudience": {"$ref": "#/$defs/expectedValue"},
+        "serviceAccount": {"$ref": "#/$defs/serviceAccount"}
+      }
+    },
+    "githubConfigSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workflowRef", "contextType", "contextValue", "audience"],
+      "properties": {
+        "id": {"enum": ["github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply"]},
+        "workflowRef": {"type": "string", "minLength": 1, "pattern": "^[^*?]+$"},
+        "contextType": {"enum": ["ref", "environment"]},
+        "contextValue": {"enum": ["refs/heads/main", "trusted-build", "infrastructure-apply"]},
+        "audience": {"const": "sts.googleapis.com"}
+      }
+    },
+    "githubConfigIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "serviceAccountId", "subjects"],
+      "properties": {
+        "providerId": {"enum": ["github-config-plan", "github-config-apply"]},
+        "serviceAccountId": {"enum": ["github-config-plan", "github-config-apply"]},
+        "subjects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/githubConfigSubject"}
+        }
+      }
+    },
+    "infrastructureDriftIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activationEnabled", "subjectId", "providerId", "serviceAccountId", "workflowRef", "environment", "allowedAudience"],
+      "properties": {
+        "activationEnabled": {"const": false},
+        "subjectId": {"const": "infrastructure-drift-plan"},
+        "providerId": {"const": "infrastructure-plan"},
+        "serviceAccountId": {"const": "infrastructure-plan"},
+        "workflowRef": {"const": "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main"},
+        "environment": {"const": "trusted-build"},
+        "allowedAudience": {"const": "sts.googleapis.com"}
+      }
+    },
+    "ciEvidenceVerifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "repositoryId", "workflowRef", "workflowSha", "allowedEvents", "ref", "environment", "serviceAccount"],
+      "properties": {
+        "providerId": {"const": "verifier"},
+        "repositoryId": {"$ref": "#/$defs/expectedValue"},
+        "workflowRef": {"$ref": "#/$defs/expectedValue"},
+        "workflowSha": {"$ref": "#/$defs/envRef"},
+        "allowedEvents": {
+          "type": "array",
+          "prefixItems": [{"const": "workflow_dispatch"}],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "ref": {"$ref": "#/$defs/expectedValue"},
+        "environment": {"const": "infrastructure-apply"},
+        "serviceAccount": {"$ref": "#/$defs/serviceAccount"}
+      }
+    },
     "provider": {
       "type": "object",
       "additionalProperties": false,
@@ -170,7 +407,7 @@
         "poolId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
         "providerId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
         "issuerUri": {"$ref": "#/$defs/envRef"},
-        "allowedAudience": {"$ref": "#/$defs/envRef"},
+        "allowedAudience": {"$ref": "#/$defs/expectedValue"},
         "subjectClaim": {"const": "assertion.sub"},
         "requiredClaims": {
           "type": "object",
@@ -183,6 +420,35 @@
           "minProperties": 1,
           "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
           "additionalProperties": {"$ref": "#/$defs/serviceAccount"}
+        }
+      }
+    },
+    "federationActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "activeSubjectIds", "gatedSubjectIds", "blockers"],
+      "properties": {
+        "state": {"const": "blocked"},
+        "activeSubjectIds": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
+        },
+        "gatedSubjectIds": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
+        },
+        "blockers": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}
         }
       }
     }

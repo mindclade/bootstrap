@@ -30,6 +30,8 @@ func main() {
 		err = planSourceCheck(os.Args[2:])
 	case "evidence":
 		err = evidenceCommand(os.Args[2:])
+	case "approval":
+		err = approvalCommand(os.Args[2:])
 	case "recovery-verify":
 		err = recoveryVerify(os.Args[2:])
 	case "render-vars":
@@ -49,6 +51,61 @@ func main() {
 		fmt.Fprintln(os.Stderr, "bootstrapctl:", err)
 		os.Exit(1)
 	}
+}
+
+func approvalCommand(args []string) error {
+	if len(args) == 0 || args[0] != "verify" {
+		return fmt.Errorf("approval requires verify")
+	}
+	flags := flag.NewFlagSet("approval verify", flag.ContinueOnError)
+	receiptPath := flags.String("receipt", "", "canonical approval receipt JSON")
+	publicKeyOne := flags.String("public-key-1", "", "first approver PKIX ECDSA public key")
+	publicKeyTwo := flags.String("public-key-2", "", "second approver PKIX ECDSA public key")
+	signatureOne := flags.String("signature-1", "", "first detached ASN.1 ECDSA signature")
+	signatureTwo := flags.String("signature-2", "", "second detached ASN.1 ECDSA signature")
+	operation := flags.String("operation", "", "apply or recovery-observation")
+	sourceSHA := flags.String("source-sha", "", "expected protected source SHA")
+	root := flags.String("root", "", "expected root or recovery-verification")
+	subjectKind := flags.String("subject-kind", "", "expected approved subject kind")
+	subjectSHA256 := flags.String("subject-sha256", "", "expected saved-plan or restore-manifest SHA-256")
+	planRunID := flags.String("plan-run-id", "", "expected plan run ID or none")
+	nowValue := flags.String("now", "", "verification time for tests, RFC3339 UTC")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("approval verify does not accept positional arguments")
+	}
+	for name, value := range map[string]string{
+		"--receipt": *receiptPath, "--public-key-1": *publicKeyOne, "--public-key-2": *publicKeyTwo,
+		"--signature-1": *signatureOne, "--signature-2": *signatureTwo, "--operation": *operation,
+		"--source-sha": *sourceSHA, "--root": *root, "--subject-kind": *subjectKind,
+		"--subject-sha256": *subjectSHA256, "--plan-run-id": *planRunID,
+	} {
+		if value == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+	now := time.Now()
+	if *nowValue != "" {
+		parsed, err := time.Parse(time.RFC3339, *nowValue)
+		if err != nil {
+			return fmt.Errorf("parse --now: %w", err)
+		}
+		now = parsed
+	}
+	receipt, err := evidence.VerifyApprovalReceipt(
+		*receiptPath,
+		[]string{*publicKeyOne, *publicKeyTwo},
+		[]string{*signatureOne, *signatureTwo},
+		evidence.ApprovalReceipt{
+			Operation: *operation, SourceSHA: *sourceSHA, Root: *root,
+			SubjectKind: *subjectKind, SubjectSHA256: *subjectSHA256, PlanRunID: *planRunID,
+		},
+		now,
+	)
+	printJSON(receipt)
+	return err
 }
 
 func renderVars(args []string) error {
@@ -202,6 +259,6 @@ func printJSON(value any) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bootstrapctl <validate|render-vars|plan-check|plan-resource-check|plan-source-check|evidence|recovery-verify|source-files> [options]")
+	fmt.Fprintln(os.Stderr, "usage: bootstrapctl <validate|render-vars|plan-check|plan-resource-check|plan-source-check|evidence|approval|recovery-verify|source-files> [options]")
 	os.Exit(2)
 }

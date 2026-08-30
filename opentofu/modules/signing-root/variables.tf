@@ -69,12 +69,14 @@ variable "keys" {
   }))
 
   validation {
-    condition = length(var.keys) == 3 && length(setsubtract(toset(keys(var.keys)), toset([
+    condition = length(var.keys) == 5 && length(setsubtract(toset(keys(var.keys)), toset([
       "audit-anchor",
       "bootstrap-handoff",
+      "github-config-plan-evidence",
+      "infrastructure-export",
       "recovery-evidence",
     ]))) == 0
-    error_message = "keys must define exactly audit-anchor, bootstrap-handoff, and recovery-evidence."
+    error_message = "keys must define exactly audit-anchor, bootstrap-handoff, github-config-plan-evidence, infrastructure-export, and recovery-evidence."
   }
 
   validation {
@@ -112,6 +114,17 @@ variable "keys" {
       ])
     ])
     error_message = "Every signing key requires source-declared vYYYYMMDD versions with canonical 90-day activation windows and one declared active version."
+  }
+}
+
+variable "disabled_signing_keys" {
+  description = "Source-complete signing keys whose IAM signer grants remain absent until connected qualification."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = var.disabled_signing_keys == toset(["infrastructure-export"])
+    error_message = "Only infrastructure-export may remain source-complete with signer IAM disabled pending connected qualification."
   }
 }
 

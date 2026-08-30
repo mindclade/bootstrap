@@ -8,4 +8,3 @@
 /policy/ @mindclade/platform-operations @mindclade/security
 /recovery/ @mindclade/platform-operations @mindclade/security
 /runbooks/ @mindclade/platform-operations @mindclade/security
-/BLUEPRINT.md @mindclade/platform-operations @mindclade/security

@@ -4,15 +4,20 @@ package evidence
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	archivepath "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -23,7 +28,18 @@ import (
 
 const SchemaVersion = "mindclade.bootstrap/plan-evidence/v1"
 
+const ApprovalReceiptSchemaVersion = "mindclade.bootstrap/approval-receipt/v1"
+
 const maxArchivedConfigurationBytes = 2 << 20
+
+const maxApprovalReceiptBytes = 64 << 10
+
+var (
+	approvalPrincipalPattern = regexp.MustCompile(`^user:[A-Za-z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
+	hexSHA256Pattern         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	fullSourceSHAPattern     = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	numericRunIDPattern      = regexp.MustCompile(`^[1-9][0-9]*$`)
+)
 
 type planModuleContract struct {
 	source       string
@@ -329,6 +345,132 @@ type Document struct {
 	Summary          plancheck.Summary `json:"summary"`
 	CreatedAt        time.Time         `json:"createdAt"`
 	ExpiresAt        time.Time         `json:"expiresAt"`
+}
+
+// ApprovalIdentity binds one named human approver to one immutable ECDSA
+// public key. The digest is over the PKIX DER bytes, not transport PEM bytes.
+type ApprovalIdentity struct {
+	Principal       string `json:"principal"`
+	PublicKeySHA256 string `json:"publicKeySha256"`
+}
+
+// ApprovalReceipt is deliberately small and canonical. Both independent
+// approvers sign the exact compact JSON bytes of the complete receipt.
+type ApprovalReceipt struct {
+	SchemaVersion string             `json:"schemaVersion"`
+	Operation     string             `json:"operation"`
+	SourceSHA     string             `json:"sourceSha"`
+	Root          string             `json:"root"`
+	SubjectKind   string             `json:"subjectKind"`
+	SubjectSHA256 string             `json:"subjectSha256"`
+	PlanRunID     string             `json:"planRunId"`
+	IssuedAt      time.Time          `json:"issuedAt"`
+	ExpiresAt     time.Time          `json:"expiresAt"`
+	Approvers     []ApprovalIdentity `json:"approvers"`
+}
+
+// VerifyApprovalReceipt verifies an expiry-bound two-person authorization
+// before any privileged workload-identity exchange. Expected values are
+// supplied by the protected workflow, never trusted from the receipt itself.
+func VerifyApprovalReceipt(receiptPath string, publicKeyPaths, signaturePaths []string, expected ApprovalReceipt, now time.Time) (ApprovalReceipt, error) {
+	receiptBytes, err := readRegularFile(receiptPath, maxApprovalReceiptBytes)
+	if err != nil {
+		return ApprovalReceipt{}, fmt.Errorf("read approval receipt: %w", err)
+	}
+	var receipt ApprovalReceipt
+	decoder := json.NewDecoder(bytes.NewReader(receiptBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&receipt); err != nil {
+		return receipt, fmt.Errorf("parse approval receipt: %w", err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return receipt, err
+	}
+	canonical, err := json.Marshal(receipt)
+	if err != nil {
+		return receipt, fmt.Errorf("canonicalize approval receipt: %w", err)
+	}
+	if !bytes.Equal(receiptBytes, canonical) {
+		return receipt, fmt.Errorf("approval receipt must be exact canonical compact JSON")
+	}
+	if receipt.SchemaVersion != ApprovalReceiptSchemaVersion {
+		return receipt, fmt.Errorf("unsupported approval receipt schema %q", receipt.SchemaVersion)
+	}
+	if receipt.Operation != expected.Operation || receipt.SourceSHA != expected.SourceSHA ||
+		receipt.Root != expected.Root || receipt.SubjectKind != expected.SubjectKind ||
+		receipt.SubjectSHA256 != expected.SubjectSHA256 || receipt.PlanRunID != expected.PlanRunID {
+		return receipt, fmt.Errorf("approval receipt does not match the exact requested operation, source, root, subject digest, and plan run")
+	}
+	if receipt.Operation != "apply" && receipt.Operation != "recovery-observation" {
+		return receipt, fmt.Errorf("unsupported approval operation %q", receipt.Operation)
+	}
+	if !fullSourceSHAPattern.MatchString(receipt.SourceSHA) || !hexSHA256Pattern.MatchString(receipt.SubjectSHA256) {
+		return receipt, fmt.Errorf("approval receipt source and subject digests must be complete lowercase hashes")
+	}
+	if receipt.Operation == "apply" {
+		if receipt.SubjectKind != "opentofu-saved-plan" || (receipt.Root != "root-trust" && receipt.Root != "recovery-plane") || !numericRunIDPattern.MatchString(receipt.PlanRunID) {
+			return receipt, fmt.Errorf("apply approval must bind an OpenTofu saved plan, supported root, and numeric plan run")
+		}
+	} else if receipt.SubjectKind != "recovery-restore-manifest" || receipt.Root != "recovery-verification" || receipt.PlanRunID != "none" {
+		return receipt, fmt.Errorf("recovery observation approval must bind the recovery restore manifest without pretending to authorize a plan")
+	}
+	issued := receipt.IssuedAt.UTC()
+	expires := receipt.ExpiresAt.UTC()
+	current := now.UTC()
+	if !receipt.IssuedAt.Equal(issued.Truncate(time.Second)) || !receipt.ExpiresAt.Equal(expires.Truncate(time.Second)) {
+		return receipt, fmt.Errorf("approval receipt timestamps must be whole UTC seconds")
+	}
+	if !expires.After(issued) || expires.Sub(issued) > 2*time.Hour {
+		return receipt, fmt.Errorf("approval receipt validity must be positive and no longer than two hours")
+	}
+	if issued.After(current.Add(5 * time.Minute)) {
+		return receipt, fmt.Errorf("approval receipt issue time is in the future")
+	}
+	if current.Before(issued) || !current.Before(expires) {
+		return receipt, fmt.Errorf("approval receipt is not currently valid")
+	}
+	if len(receipt.Approvers) != 2 || len(publicKeyPaths) != 2 || len(signaturePaths) != 2 {
+		return receipt, fmt.Errorf("approval receipt requires exactly two approvers, public keys, and signatures")
+	}
+	if receipt.Approvers[0].Principal >= receipt.Approvers[1].Principal {
+		return receipt, fmt.Errorf("approval identities must be distinct and sorted by principal")
+	}
+	for index, approver := range receipt.Approvers {
+		if !approvalPrincipalPattern.MatchString(approver.Principal) || !hexSHA256Pattern.MatchString(approver.PublicKeySHA256) {
+			return receipt, fmt.Errorf("approval identity %d must contain a named user and SHA-256 public-key digest", index+1)
+		}
+		publicKeyBytes, err := readRegularFile(publicKeyPaths[index], maxApprovalReceiptBytes)
+		if err != nil {
+			return receipt, fmt.Errorf("read approval public key %d: %w", index+1, err)
+		}
+		block, trailing := pem.Decode(publicKeyBytes)
+		if block == nil || block.Type != "PUBLIC KEY" || len(bytes.TrimSpace(trailing)) != 0 {
+			return receipt, fmt.Errorf("approval public key %d must be one PKIX PUBLIC KEY PEM block", index+1)
+		}
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return receipt, fmt.Errorf("parse approval public key %d: %w", index+1, err)
+		}
+		publicKey, ok := parsed.(*ecdsa.PublicKey)
+		if !ok || publicKey.Curve != elliptic.P256() {
+			return receipt, fmt.Errorf("approval public key %d must be ECDSA P-256", index+1)
+		}
+		if digest(block.Bytes) != approver.PublicKeySHA256 {
+			return receipt, fmt.Errorf("approval public key %d digest mismatch", index+1)
+		}
+		signature, err := readRegularFile(signaturePaths[index], maxApprovalReceiptBytes)
+		if err != nil {
+			return receipt, fmt.Errorf("read approval signature %d: %w", index+1, err)
+		}
+		hash := sha256.Sum256(receiptBytes)
+		if !ecdsa.VerifyASN1(publicKey, hash[:], signature) {
+			return receipt, fmt.Errorf("approval signature %d is invalid", index+1)
+		}
+	}
+	if receipt.Approvers[0].PublicKeySHA256 == receipt.Approvers[1].PublicKeySHA256 {
+		return receipt, fmt.Errorf("approval public keys must be distinct")
+	}
+	return receipt, nil
 }
 
 // Create writes evidence bound to a plan and the seven manifests.

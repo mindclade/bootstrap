@@ -57,6 +57,7 @@ var approvedResourceTypes = map[string]bool{
 	"google_logging_organization_sink":                true,
 	"google_logging_project_bucket_config":            true,
 	"google_logging_project_cmek_settings":            true,
+	"google_organization_iam_audit_config":            true,
 	"google_organization_iam_custom_role":             true,
 	"google_organization_iam_member":                  true,
 	"google_privileged_access_manager_entitlement":    true,
@@ -75,36 +76,52 @@ var approvedResourceTypes = map[string]bool{
 }
 
 var approvedResourceAddressFamilies = map[string]bool{
-	"managed|google_organization_iam_member|google_organization_iam_member.apply_logging_config_writer":   true,
-	"managed|google_organization_iam_member|google_organization_iam_member.apply_iam":                     true,
-	"managed|google_organization_iam_member|google_organization_iam_member.apply_organization_role_admin": true,
-	"managed|google_organization_iam_member|google_organization_iam_member.apply_workforce_admin":         true,
-	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.plan_read":           true,
-	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.recovery_sink_read":  true,
-	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.apply_iam":           true,
-	"managed|google_organization_iam_member|google_organization_iam_member.plan_read":                     true,
-	"managed|google_organization_iam_member|google_organization_iam_member.plan_workforce_viewer":         true,
-	"managed|google_organization_iam_member|google_organization_iam_member.recovery_sink_read":            true,
-	"managed|google_project|google_project.identity":                                                      true,
-	"managed|google_project|google_project.state":                                                         true,
-	"managed|google_project_iam_member|google_project_iam_member.apply_administration":                    true,
-	"managed|google_project_iam_member|google_project_iam_member.plan_read":                               true,
-	"managed|google_project_iam_member|google_project_iam_member.recovery_administration":                 true,
-	"managed|google_project_service|google_project_service.identity":                                      true,
-	"managed|google_project_service|google_project_service.state":                                         true,
+	"managed|google_organization_iam_member|google_organization_iam_member.apply_logging_config_writer":     true,
+	"managed|google_organization_iam_member|google_organization_iam_member.apply_iam":                       true,
+	"managed|google_organization_iam_member|google_organization_iam_member.apply_organization_role_admin":   true,
+	"managed|google_organization_iam_member|google_organization_iam_member.apply_workforce_admin":           true,
+	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.plan_read":             true,
+	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.recovery_sink_read":    true,
+	"managed|google_organization_iam_custom_role|google_organization_iam_custom_role.apply_iam":             true,
+	"managed|google_organization_iam_member|google_organization_iam_member.plan_read":                       true,
+	"managed|google_organization_iam_member|google_organization_iam_member.plan_workforce_viewer":           true,
+	"managed|google_organization_iam_member|google_organization_iam_member.recovery_sink_read":              true,
+	"managed|google_organization_iam_audit_config|google_organization_iam_audit_config.storage_data_access": true,
+	"managed|google_project|google_project.identity":                                                        true,
+	"managed|google_project|google_project.state":                                                           true,
+	"managed|google_project_iam_member|google_project_iam_member.apply_administration":                      true,
+	"managed|google_project_iam_member|google_project_iam_member.plan_read":                                 true,
+	"managed|google_project_iam_member|google_project_iam_member.recovery_administration":                   true,
+	"managed|google_project_service|google_project_service.identity":                                        true,
+	"managed|google_project_service|google_project_service.state":                                           true,
 
-	"managed|google_iam_workload_identity_pool|module.buildkite_federation.google_iam_workload_identity_pool.buildkite":                   true,
-	"managed|google_iam_workload_identity_pool_provider|module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite": true,
-	"managed|google_service_account|module.buildkite_federation.google_service_account.buildkite":                                         true,
-	"managed|google_service_account_iam_member|module.buildkite_federation.google_service_account_iam_member.buildkite":                   true,
-	"managed|google_iam_workload_identity_pool|module.github_federation.google_iam_workload_identity_pool.github":                         true,
-	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.github":       true,
-	"managed|google_service_account|module.github_federation.google_service_account.github":                                               true,
-	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.github":                         true,
-	"managed|google_iam_workload_identity_pool|module.gitops_federation.google_iam_workload_identity_pool.gitops":                         true,
-	"managed|google_iam_workload_identity_pool_provider|module.gitops_federation.google_iam_workload_identity_pool_provider.gitops":       true,
-	"managed|google_service_account|module.gitops_federation.google_service_account.gitops":                                               true,
-	"managed|google_service_account_iam_member|module.gitops_federation.google_service_account_iam_member.gitops":                         true,
+	"managed|google_iam_workload_identity_pool|module.buildkite_federation.google_iam_workload_identity_pool.buildkite":                           true,
+	"managed|google_iam_workload_identity_pool_provider|module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite":         true,
+	"managed|google_service_account|module.buildkite_federation.google_service_account.buildkite":                                                 true,
+	"managed|google_service_account_iam_member|module.buildkite_federation.google_service_account_iam_member.buildkite":                           true,
+	"managed|google_iam_workload_identity_pool|module.github_federation.google_iam_workload_identity_pool.github":                                 true,
+	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.github":               true,
+	"managed|google_service_account|module.github_federation.google_service_account.github":                                                       true,
+	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.github":                                 true,
+	"managed|google_iam_workload_identity_pool|module.github_federation.google_iam_workload_identity_pool.github_config":                          true,
+	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.github_config":        true,
+	"managed|google_service_account|module.github_federation.google_service_account.github_config":                                                true,
+	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.github_config":                          true,
+	"managed|google_iam_workload_identity_pool|module.github_federation.google_iam_workload_identity_pool.infrastructure_live":                    true,
+	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live":  true,
+	"managed|google_service_account|module.github_federation.google_service_account.infrastructure_live":                                          true,
+	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.infrastructure_live":                    true,
+	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift": true,
+	"managed|google_service_account|module.github_federation.google_service_account.infrastructure_drift":                                         true,
+	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.infrastructure_drift":                   true,
+	"managed|google_iam_workload_identity_pool|module.github_federation.google_iam_workload_identity_pool.ci_evidence":                            true,
+	"managed|google_iam_workload_identity_pool_provider|module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence":          true,
+	"managed|google_service_account|module.github_federation.google_service_account.ci_evidence":                                                  true,
+	"managed|google_service_account_iam_member|module.github_federation.google_service_account_iam_member.ci_evidence":                            true,
+	"managed|google_iam_workload_identity_pool|module.gitops_federation.google_iam_workload_identity_pool.gitops":                                 true,
+	"managed|google_iam_workload_identity_pool_provider|module.gitops_federation.google_iam_workload_identity_pool_provider.gitops":               true,
+	"managed|google_service_account|module.gitops_federation.google_service_account.gitops":                                                       true,
+	"managed|google_service_account_iam_member|module.gitops_federation.google_service_account_iam_member.gitops":                                 true,
 
 	"managed|google_project|module.audit_root.google_project.audit":                                               true,
 	"managed|google_project_service|module.audit_root.google_project_service.required":                            true,
@@ -181,18 +198,33 @@ var exactResourceAddressKeys = map[string]map[string]bool{
 	"module.github_federation.google_iam_workload_identity_pool_provider.github":                 stringSet("plan", "apply", "recovery"),
 	"module.github_federation.google_service_account.github":                                     stringSet("plan", "apply", "recovery"),
 	"module.github_federation.google_service_account_iam_member.github":                          stringSet("plan", "apply", "recovery"),
+	"module.github_federation.google_iam_workload_identity_pool.github_config":                   stringSet("pool"),
+	"module.github_federation.google_iam_workload_identity_pool_provider.github_config":          stringSet("plan", "apply"),
+	"module.github_federation.google_service_account.github_config":                              stringSet("plan", "apply"),
+	"module.github_federation.google_service_account_iam_member.github_config":                   stringSet("plan", "apply"),
+	"module.github_federation.google_iam_workload_identity_pool.infrastructure_live":             stringSet("pool"),
+	"module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live":    stringSet("development-plan", "development-apply", "staging-plan", "staging-apply", "production-plan", "production-apply", "restricted-plan", "restricted-apply"),
+	"module.github_federation.google_service_account.infrastructure_live":                        stringSet("development-plan", "development-apply", "staging-plan", "staging-apply", "production-plan", "production-apply", "restricted-plan", "restricted-apply"),
+	"module.github_federation.google_service_account_iam_member.infrastructure_live":             stringSet("development-plan", "development-apply", "staging-plan", "staging-apply", "production-plan", "production-apply", "restricted-plan", "restricted-apply"),
+	"module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift":   stringSet("drift"),
+	"module.github_federation.google_service_account.infrastructure_drift":                       stringSet("drift"),
+	"module.github_federation.google_service_account_iam_member.infrastructure_drift":            stringSet("drift"),
+	"module.github_federation.google_iam_workload_identity_pool.ci_evidence":                     stringSet("archive"),
+	"module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence":            stringSet("writer", "verifier"),
+	"module.github_federation.google_service_account.ci_evidence":                                stringSet("writer", "verifier"),
+	"module.github_federation.google_service_account_iam_member.ci_evidence":                     stringSet("writer", "verifier"),
 	"module.audit_root.google_project_service.required":                                          stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "logging.googleapis.com", "serviceusage.googleapis.com"),
 	"module.audit_root.google_kms_key_ring.audit":                                                stringSet("primary", "recovery"),
 	"module.audit_root.google_kms_crypto_key.audit":                                              stringSet("primary", "recovery"),
 	"module.audit_root.data.google_logging_project_cmek_settings.audit":                          stringSet("primary", "recovery"),
 	"module.audit_root.google_kms_crypto_key_iam_member.logging":                                 stringSet("primary", "recovery"),
 	"module.audit_root.google_logging_project_bucket_config.audit":                               stringSet("primary", "recovery"),
-	"module.audit_root.google_logging_organization_sink.audit":                                   stringSet("admin-activity", "admin-activity-recovery", "security-events", "security-events-recovery"),
+	"module.audit_root.google_logging_organization_sink.audit":                                   stringSet("admin-activity", "admin-activity-recovery", "data-access", "data-access-recovery", "security-events", "security-events-recovery"),
 	"module.audit_root.google_project_iam_member.sink_writer":                                    stringSet("primary", "recovery"),
 	"module.audit_root.google_project_iam_custom_role.plan_read":                                 stringSet("primary", "recovery"),
 	"module.audit_root.google_project_iam_member.plan_read":                                      stringSet("primary", "recovery"),
 	"module.signing_root.google_project_service.required":                                        stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "serviceusage.googleapis.com"),
-	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "recovery-evidence"),
+	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
 	"module.recovery_exports.google_kms_crypto_key.recovery":                                     stringSet("exports", "evidence"),
 	"module.recovery_exports.google_kms_crypto_key_iam_member.storage":                           stringSet("exports", "evidence"),
 	"module.recovery_exports.google_storage_bucket.recovery":                                     stringSet("exports", "evidence"),
@@ -256,7 +288,7 @@ func addStateBackendAddressFamilies() {
 		exactResourceAddressKeys[module+".google_storage_bucket.state"] = stringSet("primary", "replica")
 		exactResourceAddressKeys[module+".google_storage_bucket_iam_member.backend_access"] = stringSet(
 			"primary-plan-state", "primary-plan-metadata", "primary-plan-lock", "primary-apply", "primary-recovery", "primary-recovery-metadata",
-			"replica-plan-state", "replica-plan-metadata", "replica-apply", "replica-recovery", "replica-recovery-metadata",
+			"replica-plan-state", "replica-plan-metadata", "replica-recovery", "replica-recovery-metadata",
 		)
 		exactResourceAddressKeys[module+".google_storage_bucket_iam_member.replication"] = stringSet("source", "destination")
 		exactResourceAddressKeys[module+".google_project_iam_member.replication_events"] = stringSet("transfer", "storage")
@@ -286,10 +318,7 @@ func addRootTrustAddressKeys() {
 
 	administrationRoles := map[string][]string{
 		"identity": {"roles/iam.workloadIdentityPoolAdmin", "roles/privilegedaccessmanager.admin", "roles/resourcemanager.projectIamAdmin", "roles/serviceusage.serviceUsageAdmin"},
-		"state":    {"roles/cloudkms.admin", "roles/iam.roleAdmin", "roles/iam.serviceAccountAdmin", "roles/privilegedaccessmanager.admin", "roles/resourcemanager.projectIamAdmin", "roles/serviceusage.serviceUsageAdmin", "roles/storage.admin", "roles/storagetransfer.user"},
-		"recovery": {"roles/cloudkms.admin", "roles/iam.roleAdmin", "roles/iam.serviceAccountAdmin", "roles/logging.configWriter", "roles/privilegedaccessmanager.admin", "roles/resourcemanager.projectIamAdmin", "roles/serviceusage.serviceUsageAdmin", "roles/storage.admin", "roles/storagetransfer.user"},
 		"audit":    {"roles/cloudkms.admin", "roles/resourcemanager.projectIamAdmin", "roles/serviceusage.serviceUsageAdmin"},
-		"signing":  {"roles/cloudkms.admin", "roles/privilegedaccessmanager.admin", "roles/resourcemanager.projectIamAdmin", "roles/serviceusage.serviceUsageAdmin"},
 	}
 	var administrationKeys []string
 	for project, roles := range administrationRoles {
@@ -456,8 +485,11 @@ var organizationPlanReadRoleContract = replicationRoleContract{
 }
 
 var recoverySinkReadRoleContract = replicationRoleContract{
-	roleID:      "bootstrapRecoverySinkRead",
-	permissions: []string{"logging.sinks.get"},
+	roleID: "bootstrapRecoverySinkRead",
+	permissions: []string{
+		"logging.sinks.get",
+		"resourcemanager.organizations.getIamPolicy",
+	},
 }
 
 var organizationIAMApplyRoleContract = replicationRoleContract{
@@ -521,7 +553,7 @@ var recoveryStateExportRoleContracts = map[string]replicationRoleContract{
 
 var recoveryStateExportKeys = []string{"root-trust", "recovery-plane"}
 
-var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "recovery-evidence"}
+var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"}
 
 var replicationPrefixes = map[string]string{
 	"module.root_state":     "root-trust/default.tfstate",
@@ -537,7 +569,6 @@ var stateBackendAccessRoles = map[string]string{
 	"primary-recovery-metadata": "roles/storage.legacyBucketReader",
 	"replica-plan-state":        "roles/storage.objectViewer",
 	"replica-plan-metadata":     "roles/storage.legacyBucketReader",
-	"replica-apply":             "roles/storage.objectAdmin",
 	"replica-recovery":          "roles/storage.objectViewer",
 	"replica-recovery-metadata": "roles/storage.legacyBucketReader",
 }
@@ -681,7 +712,15 @@ func AnalyzeForRoot(data []byte, root string) (Summary, error) {
 			result.Violations = append(result.Violations, "--root root-trust plan must contain the exact compiled bootstrap signing-version declaration")
 		}
 	}
-	validateCompositionCompleteness(parsed.ResourceChanges, root, contract, &result.Violations)
+	ciEvidenceEnabled := false
+	if bootstrapVariable, ok := parsed.Variables["bootstrap"]; ok {
+		if bootstrap, ok := bootstrapVariable.Value.(map[string]any); ok {
+			if ciEvidence, ok := bootstrap["github_ci_evidence"].(map[string]any); ok {
+				ciEvidenceEnabled, _ = ciEvidence["activation_enabled"].(bool)
+			}
+		}
+	}
+	validateCompositionCompleteness(parsed.ResourceChanges, root, contract, ciEvidenceEnabled, &result.Violations)
 	if root == "root-trust" && present && contractError == nil {
 		validateSigningDeclarationOutput(parsed.OutputChanges, contract, &result.Violations)
 		validateRootTrustVariableGraph(parsed, contract, &result.Violations)
@@ -1579,14 +1618,14 @@ func exactExpressionReferences(value any, expected []string) bool {
 }
 
 var rootTrustDynamicFamilyCounts = map[string]int{
-	"module.audit_root.google_project_iam_member.reader":               4,
+	"module.audit_root.google_project_iam_member.reader":               6,
 	"module.audit_root.google_project_iam_member.administrator":        2,
-	"module.signing_root.google_kms_key_ring_iam_member.administrator": 3,
-	"module.signing_root.google_kms_crypto_key_iam_member.signer":      6,
+	"module.signing_root.google_kms_key_ring_iam_member.administrator": 2,
+	"module.signing_root.google_kms_crypto_key_iam_member.signer":      7,
 	"module.break_glass.google_project_service.pam":                    4,
 }
 
-func validateCompositionCompleteness(resources []resourceChange, root string, signing *signingContract, violations *[]string) {
+func validateCompositionCompleteness(resources []resourceChange, root string, signing *signingContract, ciEvidenceEnabled bool, violations *[]string) {
 	wantRecovery := root == "recovery-plane"
 	if len(resources) == 0 {
 		*violations = append(*violations, fmt.Sprintf("--root %s plan must contain the configured Ring-0 resources, including no-op instances", root))
@@ -1616,6 +1655,18 @@ func validateCompositionCompleteness(resources []resourceChange, root string, si
 		base := parts[2]
 		isRecovery := strings.HasPrefix(base, "module.recovery_exports.")
 		if isRecovery != wantRecovery {
+			continue
+		}
+		if !ciEvidenceEnabled && (base == "module.github_federation.google_iam_workload_identity_pool.ci_evidence" ||
+			base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" ||
+			base == "module.github_federation.google_service_account_iam_member.ci_evidence") {
+			continue
+		}
+		if base == "module.github_federation.google_iam_workload_identity_pool.github_config" ||
+			base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" ||
+			base == "module.github_federation.google_service_account_iam_member.github_config" ||
+			base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift" ||
+			base == "module.github_federation.google_service_account_iam_member.infrastructure_drift" {
 			continue
 		}
 		if base == "module.signing_root.google_kms_crypto_key_version.signing" {
@@ -1722,12 +1773,19 @@ func validateAuditReaderCoverage(resources []resourceChange, projects map[string
 	}
 	primary := byProject[projects["audit"]]
 	recovery := byProject[projects["recovery"]]
-	valid := len(byProject) == 2 && len(primary) == 2 && sameStringSet(primary, recovery)
+	valid := len(byProject) == 2 && len(primary) == 3 && sameStringSet(primary, recovery)
+	groupCount := 0
+	recoveryCount := 0
 	for member := range primary {
-		valid = valid && groupEmailPrincipalPattern.MatchString(member)
+		if groupEmailPrincipalPattern.MatchString(member) {
+			groupCount++
+		}
+		if bootstrapRecoveryPrincipalPattern.MatchString(member) {
+			recoveryCount++
+		}
 	}
-	if !valid {
-		*violations = append(*violations, "audit reader instances must exactly replicate the two declared human groups across both exact audit-bucket views")
+	if !valid || groupCount != 2 || recoveryCount != 1 {
+		*violations = append(*violations, "audit reader instances must exactly replicate two declared human groups plus the recovery identity across both exact audit-bucket views")
 	}
 }
 
@@ -1754,15 +1812,17 @@ func validateAuditAdministratorCoverage(resources []resourceChange, violations *
 
 func validateSigningAdministratorCoverage(resources []resourceChange, violations *[]string) {
 	members := map[string]bool{}
-	apply := false
 	for _, resource := range resources {
 		after, _ := resource.Change.After.(map[string]any)
 		member, _ := after["member"].(string)
 		members[member] = true
-		apply = apply || bootstrapApplyPrincipalPattern.MatchString(member)
 	}
-	if len(members) != 3 || !apply {
-		*violations = append(*violations, "signing key-ring administrator instances must contain two declared administrators and the bootstrap-apply identity")
+	valid := len(members) == 2
+	for member := range members {
+		valid = valid && groupEmailPrincipalPattern.MatchString(member) && !bootstrapApplyPrincipalPattern.MatchString(member)
+	}
+	if !valid {
+		*violations = append(*violations, "signing key-ring administrator instances must contain only the two declared independent administrators")
 	}
 }
 
@@ -1792,11 +1852,12 @@ func validateSigningPrincipalCoverage(allResources, resources []resourceChange, 
 	for member := range byKey["recovery-evidence"] {
 		recoveryIdentity = recoveryIdentity || bootstrapRecoveryPrincipalPattern.MatchString(member)
 	}
-	valid := len(byKey) == 3 && len(byKey["audit-anchor"]) == 2 && len(byKey["bootstrap-handoff"]) == 2 &&
+	valid := len(byKey) == 4 && len(byKey["audit-anchor"]) == 2 && len(byKey["bootstrap-handoff"]) == 2 &&
+		len(byKey["github-config-plan-evidence"]) == 1 && len(byKey["infrastructure-export"]) == 0 &&
 		len(byKey["recovery-evidence"]) == 2 && buildkiteMember != "" && byKey["audit-anchor"][buildkiteMember] &&
 		byKey["bootstrap-handoff"][buildkiteMember] && recoveryIdentity
 	if !valid {
-		*violations = append(*violations, "signer instances must exactly cover one declared signer plus the approved pipeline/recovery identity for each signing key")
+		*violations = append(*violations, "signer instances must exactly cover approved pipeline/recovery/governance identities while infrastructure-export remains IAM-disabled pending qualification")
 	}
 }
 
@@ -1978,33 +2039,29 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		service := resourceAfter(resources, serviceAddress)
 		binding := resourceAfter(resources, bindingAddress)
 		serviceProject := projects["root_state"]
+		poolProject := projects["identity"]
 		if instance == "recovery" {
 			serviceProject = projects["recovery"]
+			poolProject = projects["recovery"]
 		}
 		poolID := stringValue(poolIDs[instance])
 		providerID := stringValue(providerIDs[instance])
 		accountID := stringValue(serviceAccountIDs[instance])
-		if pool == nil || pool["project"] != projects["identity"] || pool["workload_identity_pool_id"] != poolID {
-			*violations = append(*violations, poolAddress+" must exactly equal its compiled identity project and pool ID")
+		if pool == nil || pool["project"] != poolProject || pool["workload_identity_pool_id"] != poolID {
+			*violations = append(*violations, poolAddress+" must exactly equal its compiled separated pool project and pool ID")
 		}
 		if service == nil || service["project"] != serviceProject || service["account_id"] != accountID {
 			*violations = append(*violations, serviceAddress+" must exactly equal its compiled service-account project and ID")
 		}
-		environment := map[string]string{"plan": "infrastructure-plan", "apply": "infrastructure-apply", "recovery": "recovery-verification"}[instance]
-		repository, _ := github["repository_full_name"].(string)
-		repositoryParts := strings.Split(repository, "/")
-		subject := ""
-		if len(repositoryParts) == 2 {
-			subject = fmt.Sprintf("repo:%s@%s/%s@%s:environment:%s", repositoryParts[0], stringValue(github["repository_owner_id"]), repositoryParts[1], stringValue(github["repository_id"]), environment)
-		}
-		expectedClaims := map[string]string{
-			"sub": subject, "repository_id": stringValue(github["repository_id"]), "repository_owner_id": stringValue(github["repository_owner_id"]),
-			"ref": stringValue(github["branch_ref"]), "workflow_ref": stringValue(workflowRefs[instance]), "environment": environment,
-		}
-		validateCompiledWorkloadProvider(providerAddress, provider, projects["identity"], poolID, providerID,
-			stringValue(github["issuer_uri"]), stringValue(audiences[instance]), expectedClaims, violations)
+		environment := map[string]string{"plan": "trusted-build", "apply": "infrastructure-apply", "recovery": "infrastructure-apply"}[instance]
+		validateCompiledBootstrapProvider(providerAddress, provider, github, poolProject, poolID, providerID,
+			stringValue(audiences[instance]), environment, stringValue(workflowRefs[instance]), violations)
 		validateCompiledFederationBinding(bindingAddress, binding, pool, accountID, serviceProject, "repository_id", stringValue(github["repository_id"]), violations)
 	}
+	validateCompiledFederationActivation(bootstrap, violations)
+	validateCompiledGithubConfigGraph(resources, bootstrap, projects, violations)
+	validateCompiledInfrastructureFederationGraph(resources, bootstrap, projects, violations)
+	validateCompiledCIEvidenceGraph(resources, bootstrap, projects, violations)
 
 	buildkite, _ := bootstrap["buildkite"].(map[string]any)
 	principals.buildkite = serviceAccountPrincipal(stringValue(buildkite["service_account_id"]), projects["root_state"])
@@ -2018,6 +2075,315 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		"sub": stringValue(gitops["subject"]), "repository": stringValue(gitops["repository"]), "ref": stringValue(gitops["ref"]),
 	}, "repository", stringValue(gitops["repository"]), violations)
 	return principals
+}
+
+func validateCompiledFederationActivation(bootstrap map[string]any, violations *[]string) {
+	activation, ok := bootstrap["github_activation"].(map[string]any)
+	active := stringSetFromList(activation["active_subject_ids"])
+	gated := stringSetFromList(activation["gated_subject_ids"])
+	blockers := stringSetFromList(activation["blockers"])
+	expectedActive := stringSet(
+		"bootstrap-protected-plan", "bootstrap-protected-apply", "bootstrap-recovery-verification",
+		"infrastructure-live-development-plan", "infrastructure-live-development-apply",
+		"infrastructure-live-staging-plan", "infrastructure-live-staging-apply",
+		"infrastructure-live-production-plan", "infrastructure-live-production-apply",
+		"infrastructure-live-restricted-plan", "infrastructure-live-restricted-apply",
+	)
+	expectedGated := stringSet(
+		"github-config-drift-plan", "github-config-protected-plan", "github-config-protected-apply",
+		"infrastructure-drift-plan", "infrastructure-ci-evidence-verifier",
+	)
+	expectedBlockers := stringSet(
+		"github-config-control-plane-federation-not-connected-qualified",
+		"infrastructure-drift-federation-not-connected-qualified",
+		"ci-evidence-federation-not-connected-qualified",
+	)
+	if !ok || activation["state"] != "blocked" || !sameStringSet(active, expectedActive) ||
+		!sameStringSet(gated, expectedGated) || !sameStringSet(blockers, expectedBlockers) ||
+		len(active)+len(gated) != 16 {
+		*violations = append(*violations, "compiled federation activation must classify exactly eleven active and five source-complete gated catalog subjects with the three exact blockers")
+	}
+}
+
+func validateCompiledGithubConfigGraph(resources []resourceChange, bootstrap map[string]any, projects map[string]string, violations *[]string) {
+	declaration, ok := bootstrap["github_config"].(map[string]any)
+	identities, identitiesOK := declaration["identities"].(map[string]any)
+	expectedSubjects := map[string]map[string]bool{
+		"plan":  stringSet("github-config-drift-plan", "github-config-protected-plan"),
+		"apply": stringSet("github-config-protected-apply"),
+	}
+	valid := ok && identitiesOK && declaration["activation_enabled"] == false && declaration["pool_id"] == "github-config" &&
+		declaration["issuer_uri"] == "https://token.actions.githubusercontent.com" &&
+		declaration["repository_owner_id"] == "316676129" && declaration["repository_id"] == "1350986053" &&
+		declaration["immutable_repository"] == "mindclade@316676129/github-config@1350986053" &&
+		declaration["repository_full_name"] == "mindclade/github-config" && declaration["branch_ref"] == "refs/heads/main" &&
+		sameStringSet(stringSetFromMap(identities), stringSet("plan", "apply"))
+	for _, identityKey := range []string{"plan", "apply"} {
+		identity, _ := identities[identityKey].(map[string]any)
+		accountID := "github-config-" + identityKey
+		subjects, _ := identity["subjects"].([]any)
+		seenSubjects := map[string]bool{}
+		for _, raw := range subjects {
+			subject, _ := raw.(map[string]any)
+			seenSubjects[stringValue(subject["id"])] = true
+			valid = valid && subject["audience"] == "sts.googleapis.com"
+		}
+		valid = valid && identity["provider_id"] == accountID && identity["service_account_id"] == accountID &&
+			sameStringSet(seenSubjects, expectedSubjects[identityKey])
+		address := indexedResourceAddress("module.github_federation.google_service_account.github_config", identityKey)
+		service := resourceAfter(resources, address)
+		if service == nil || service["project"] != projects["identity"] || service["account_id"] != accountID {
+			*violations = append(*violations, address+" must preserve the exact roleless github-config source-stub account")
+		}
+	}
+	for _, resource := range resources {
+		base := resourceAddressBase(resource.Address)
+		if base == "module.github_federation.google_iam_workload_identity_pool.github_config" ||
+			base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" ||
+			base == "module.github_federation.google_service_account_iam_member.github_config" {
+			*violations = append(*violations, resource.Address+" must be absent while github-config federation activation is disabled")
+		}
+	}
+	if !valid {
+		*violations = append(*violations, "compiled github-config federation must retain its exact immutable repository and three activation-gated catalog subjects")
+	}
+}
+
+func validateCompiledBootstrapProvider(address string, provider, github map[string]any, project, poolID, providerID, audience, environment, workflowRef string, violations *[]string) {
+	expectedMapping := map[string]string{
+		"google.subject":                  "assertion.sub",
+		"attribute.repo":                  "assertion.repo",
+		"attribute.repository_id":         "assertion.repository_id",
+		"attribute.repository_owner_id":   "assertion.repository_owner_id",
+		"attribute.ref":                   "assertion.ref",
+		"attribute.workflow_ref":          "assertion.workflow_ref",
+		"attribute.workflow_sha":          "assertion.workflow_sha",
+		"attribute.environment":           "assertion.environment",
+		"attribute.event_name":            "assertion.event_name",
+		"attribute.repository_visibility": "assertion.repository_visibility",
+		"attribute.runner_environment":    "assertion.runner_environment",
+	}
+	oidc, _ := singleObject(provider["oidc"])
+	if provider == nil || provider["project"] != project || provider["workload_identity_pool_id"] != poolID ||
+		provider["workload_identity_pool_provider_id"] != providerID || !exactStringMap(provider["attribute_mapping"], expectedMapping) ||
+		provider["attribute_condition"] != bootstrapProviderCondition(github, environment, workflowRef) ||
+		oidc["issuer_uri"] != github["issuer_uri"] || !exactStringSet(oidc["allowed_audiences"], []string{audience}) {
+		*violations = append(*violations, address+" must exactly bind its immutable custom repository subject, source SHA, workflow, protected environment, runner class, and approved audience")
+	}
+}
+
+func bootstrapProviderCondition(github map[string]any, environment, workflowRef string) string {
+	repository := stringValue(github["repository_full_name"])
+	repositoryParts := strings.Split(repository, "/")
+	immutableRepository := ""
+	if len(repositoryParts) == 2 {
+		immutableRepository = fmt.Sprintf("%s@%s/%s@%s", repositoryParts[0], stringValue(github["repository_owner_id"]), repositoryParts[1], stringValue(github["repository_id"]))
+	}
+	return strings.Join([]string{
+		fmt.Sprintf("assertion.sub == 'repo:%s:context:environment%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
+		fmt.Sprintf("assertion.repo == '%s'", immutableRepository),
+		fmt.Sprintf("assertion.repository == '%s'", repository),
+		"assertion.repository_owner == 'mindclade'",
+		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(github["repository_id"])),
+		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(github["repository_owner_id"])),
+		"assertion.repository_visibility == 'private'",
+		fmt.Sprintf("assertion.ref == '%s'", stringValue(github["branch_ref"])),
+		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
+		"assertion.workflow_sha == assertion.sha",
+		"assertion.event_name == 'workflow_dispatch'",
+		fmt.Sprintf("assertion.environment == '%s'", environment),
+		"assertion.runner_environment == 'self-hosted'",
+	}, " && ")
+}
+
+func validateCompiledInfrastructureFederationGraph(resources []resourceChange, bootstrap map[string]any, projects map[string]string, violations *[]string) {
+	const prefix = "module.github_federation."
+	declaration, declarationOK := bootstrap["github_infrastructure"].(map[string]any)
+	identities, identitiesOK := declaration["identities"].(map[string]any)
+	expectedIdentities := stringSet(
+		"development-plan", "development-apply", "staging-plan", "staging-apply",
+		"production-plan", "production-apply", "restricted-plan", "restricted-apply",
+	)
+	if !declarationOK || !identitiesOK || !sameStringSet(stringSetFromMap(identities), expectedIdentities) {
+		*violations = append(*violations, "root-trust variables must declare exactly the eight infrastructure-live federation identities")
+		return
+	}
+	drift, driftOK := declaration["drift"].(map[string]any)
+	driftValid := driftOK && drift["activation_enabled"] == false && drift["subject_id"] == "infrastructure-drift-plan" &&
+		drift["provider_id"] == "infrastructure-plan" && drift["service_account_id"] == "infrastructure-plan" &&
+		drift["workflow_ref"] == "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main" &&
+		drift["environment"] == "trusted-build" && drift["audience"] == "sts.googleapis.com"
+	driftServiceAddress := indexedResourceAddress(prefix+"google_service_account.infrastructure_drift", "drift")
+	driftService := resourceAfter(resources, driftServiceAddress)
+	if !driftValid || driftService == nil || driftService["project"] != projects["identity"] || driftService["account_id"] != "infrastructure-plan" {
+		*violations = append(*violations, driftServiceAddress+" must preserve the exact roleless activation-gated infrastructure drift identity")
+	}
+	for _, resource := range resources {
+		base := resourceAddressBase(resource.Address)
+		if base == prefix+"google_iam_workload_identity_pool_provider.infrastructure_drift" ||
+			base == prefix+"google_service_account_iam_member.infrastructure_drift" {
+			*violations = append(*violations, resource.Address+" must be absent while infrastructure drift federation activation is disabled")
+		}
+	}
+	poolAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool.infrastructure_live", "pool")
+	pool := resourceAfter(resources, poolAddress)
+	if pool == nil || pool["project"] != projects["identity"] || pool["workload_identity_pool_id"] != declaration["pool_id"] {
+		*violations = append(*violations, poolAddress+" must exactly equal the compiled identity project and infrastructure-live pool ID")
+	}
+	expectedMapping := map[string]string{
+		"google.subject":                "assertion.sub",
+		"attribute.repo":                "assertion.repo",
+		"attribute.repository_id":       "assertion.repository_id",
+		"attribute.repository_owner_id": "assertion.repository_owner_id",
+		"attribute.workflow_ref":        "assertion.workflow_ref",
+		"attribute.workflow_sha":        "assertion.workflow_sha",
+		"attribute.environment":         "assertion.environment",
+	}
+	seenAudiences := map[string]bool{}
+	for identityKey := range expectedIdentities {
+		identity, _ := identities[identityKey].(map[string]any)
+		providerAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool_provider.infrastructure_live", identityKey)
+		serviceAddress := indexedResourceAddress(prefix+"google_service_account.infrastructure_live", identityKey)
+		bindingAddress := indexedResourceAddress(prefix+"google_service_account_iam_member.infrastructure_live", identityKey)
+		provider := resourceAfter(resources, providerAddress)
+		service := resourceAfter(resources, serviceAddress)
+		binding := resourceAfter(resources, bindingAddress)
+		accountID := stringValue(identity["service_account_id"])
+		audience := stringValue(identity["audience"])
+		providerID := stringValue(identity["provider_id"])
+		environment := stringValue(identity["environment"])
+		mapping := map[string]string{}
+		for key, value := range expectedMapping {
+			mapping[key] = value
+		}
+		mapping["attribute.infrastructure_identity"] = "'" + identityKey + "'"
+		oidc, _ := singleObject(provider["oidc"])
+		expectedCondition := infrastructureProviderCondition(declaration, environment)
+		if provider == nil || provider["project"] != projects["identity"] || provider["workload_identity_pool_id"] != declaration["pool_id"] ||
+			provider["workload_identity_pool_provider_id"] != providerID || !exactStringMap(provider["attribute_mapping"], mapping) ||
+			provider["attribute_condition"] != expectedCondition || oidc["issuer_uri"] != declaration["issuer_uri"] ||
+			!exactStringSet(oidc["allowed_audiences"], []string{audience}) {
+			*violations = append(*violations, providerAddress+" must exactly bind its immutable repository subject, source SHA, environment, provider, and singleton audience")
+		}
+		if service == nil || service["project"] != projects["identity"] || service["account_id"] != accountID {
+			*violations = append(*violations, serviceAddress+" must create only its compiled roleless identity-project service account")
+		}
+		validateCompiledFederationBinding(bindingAddress, binding, pool, accountID, projects["identity"], "infrastructure_identity", identityKey, violations)
+		if audience == "" || seenAudiences[audience] {
+			*violations = append(*violations, providerAddress+" must use one unique nonempty infrastructure-live audience")
+		}
+		seenAudiences[audience] = true
+	}
+}
+
+func infrastructureProviderCondition(declaration map[string]any, environment string) string {
+	immutableRepository := stringValue(declaration["immutable_repository"])
+	workflowRef := stringValue(declaration["workflow_ref"])
+	return strings.Join([]string{
+		fmt.Sprintf("assertion.sub == 'repo:%s:context:environment%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
+		fmt.Sprintf("assertion.repo == '%s'", immutableRepository),
+		fmt.Sprintf("assertion.repository == '%s'", stringValue(declaration["repository_full_name"])),
+		"assertion.repository_owner == 'mindclade'",
+		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(declaration["repository_owner_id"])),
+		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(declaration["repository_id"])),
+		"assertion.repository_visibility == 'private'",
+		fmt.Sprintf("assertion.ref == '%s'", stringValue(declaration["branch_ref"])),
+		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
+		"assertion.workflow_sha == assertion.sha",
+		"assertion.event_name == 'workflow_dispatch'",
+		fmt.Sprintf("assertion.environment == '%s'", environment),
+		"assertion.runner_environment == 'github-hosted'",
+	}, " && ")
+}
+
+func stringSetFromMap(values map[string]any) map[string]bool {
+	result := map[string]bool{}
+	for key := range values {
+		result[key] = true
+	}
+	return result
+}
+
+func stringSetFromList(value any) map[string]bool {
+	result := map[string]bool{}
+	items, _ := value.([]any)
+	for _, item := range items {
+		text, _ := item.(string)
+		if text != "" {
+			result[text] = true
+		}
+	}
+	return result
+}
+
+func validateCompiledCIEvidenceGraph(resources []resourceChange, bootstrap map[string]any, projects map[string]string, violations *[]string) {
+	declaration, declarationOK := bootstrap["github_ci_evidence"].(map[string]any)
+	enabled, enabledOK := declaration["activation_enabled"].(bool)
+	const prefix = "module.github_federation."
+	ciEvidenceBase := func(resource resourceChange) bool {
+		base := resourceAddressBase(resource.Address)
+		return base == prefix+"google_iam_workload_identity_pool.ci_evidence" ||
+			base == prefix+"google_iam_workload_identity_pool_provider.ci_evidence" ||
+			base == prefix+"google_service_account.ci_evidence" ||
+			base == prefix+"google_service_account_iam_member.ci_evidence"
+	}
+	if !declarationOK || !enabledOK {
+		*violations = append(*violations, "root-trust variables must declare the source-gated CI-evidence federation")
+		return
+	}
+	if !enabled {
+		for _, resource := range resources {
+			base := resourceAddressBase(resource.Address)
+			if ciEvidenceBase(resource) && base != prefix+"google_service_account.ci_evidence" {
+				*violations = append(*violations, resource.Address+" must be absent while CI-evidence federation activation is disabled")
+			}
+		}
+		for _, role := range []string{"writer", "verifier"} {
+			roleDeclaration, _ := declaration[role].(map[string]any)
+			address := indexedResourceAddress(prefix+"google_service_account.ci_evidence", role)
+			service := resourceAfter(resources, address)
+			if service == nil || service["project"] != projects["identity"] || service["account_id"] != roleDeclaration["service_account_id"] {
+				*violations = append(*violations, address+" must preserve the exact roleless source-stub account while CI-evidence federation is disabled")
+			}
+		}
+		return
+	}
+
+	poolAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool.ci_evidence", "archive")
+	pool := resourceAfter(resources, poolAddress)
+	if pool == nil || pool["project"] != projects["identity"] || pool["workload_identity_pool_id"] != declaration["pool_id"] {
+		*violations = append(*violations, poolAddress+" must exactly equal the compiled identity project and dedicated pool ID")
+	}
+	issuer, _ := bootstrap["github"].(map[string]any)
+	for _, role := range []string{"writer", "verifier"} {
+		roleDeclaration, _ := declaration[role].(map[string]any)
+		providerAddress := indexedResourceAddress(prefix+"google_iam_workload_identity_pool_provider.ci_evidence", role)
+		serviceAddress := indexedResourceAddress(prefix+"google_service_account.ci_evidence", role)
+		bindingAddress := indexedResourceAddress(prefix+"google_service_account_iam_member.ci_evidence", role)
+		provider := resourceAfter(resources, providerAddress)
+		service := resourceAfter(resources, serviceAddress)
+		binding := resourceAfter(resources, bindingAddress)
+		accountID := stringValue(roleDeclaration["service_account_id"])
+		if provider == nil || provider["project"] != projects["identity"] || provider["workload_identity_pool_id"] != declaration["pool_id"] ||
+			provider["workload_identity_pool_provider_id"] != roleDeclaration["provider_id"] {
+			*violations = append(*violations, providerAddress+" must exactly equal its compiled identity project, pool, and provider ID")
+		} else {
+			oidc, _ := singleObject(provider["oidc"])
+			condition := stringValue(provider["attribute_condition"])
+			expectedWorkflow := stringValue(roleDeclaration["workflow_sha"])
+			if role == "writer" {
+				expectedWorkflow = stringValue(roleDeclaration["job_workflow_ref"])
+			}
+			if oidc["issuer_uri"] != issuer["issuer_uri"] || !plannedUnset(oidc["allowed_audiences"]) ||
+				!strings.Contains(condition, "'"+expectedWorkflow+"'") {
+				*violations = append(*violations, providerAddress+" must use its compiled issuer, Google's canonical provider audience, and immutable workflow binding")
+			}
+		}
+		if service == nil || service["project"] != projects["identity"] || service["account_id"] != accountID {
+			*violations = append(*violations, serviceAddress+" must create only its compiled keyless identity-project service account")
+		}
+		validateCompiledFederationBinding(bindingAddress, binding, pool, accountID, projects["identity"], "evidence_role", role, violations)
+	}
 }
 
 func serviceAccountPrincipal(accountID, projectID string) string {
@@ -2083,11 +2449,20 @@ func validateCompiledFederationBinding(address string, after, pool map[string]an
 }
 
 func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[string]any, signing *signingContract, principals bootstrapPrincipals, violations *[]string) {
+	expectedRootAdministrator, _ := bootstrap["root_administrator_principal"].(string)
 	expectedRecoveryAdministrator, _ := bootstrap["recovery_administrator_principal"].(string)
 	actualRecoveryAdministrators := map[string]bool{}
+	rootOrganizationBindings := map[string]string{}
 	for _, resource := range resources {
 		after, _ := resource.Change.After.(map[string]any)
 		member, _ := after["member"].(string)
+		switch resourceAddressBase(resource.Address) {
+		case "google_organization_iam_member.apply_iam",
+			"google_organization_iam_member.apply_logging_config_writer",
+			"google_organization_iam_member.apply_organization_role_admin",
+			"google_organization_iam_member.apply_workforce_admin":
+			rootOrganizationBindings[resourceAddressBase(resource.Address)] = member
+		}
 		if resourceAddressBase(resource.Address) == "google_project_iam_member.recovery_administration" {
 			actualRecoveryAdministrators[member] = true
 		}
@@ -2100,6 +2475,19 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 			*violations = append(*violations, resource.Address+" substitutes a same-shaped bootstrap-recovery identity outside the compiled project")
 		}
 	}
+	expectedRootOrganizationAddresses := []string{
+		"google_organization_iam_member.apply_iam",
+		"google_organization_iam_member.apply_logging_config_writer",
+		"google_organization_iam_member.apply_organization_role_admin",
+		"google_organization_iam_member.apply_workforce_admin",
+	}
+	rootOrganizationBindingsValid := groupEmailPrincipalPattern.MatchString(expectedRootAdministrator) && len(rootOrganizationBindings) == len(expectedRootOrganizationAddresses)
+	for _, address := range expectedRootOrganizationAddresses {
+		rootOrganizationBindingsValid = rootOrganizationBindingsValid && rootOrganizationBindings[address] == expectedRootAdministrator
+	}
+	if !rootOrganizationBindingsValid {
+		*violations = append(*violations, "organization administration bindings must exactly equal the compiled independent root-administrator group and never the bootstrap-apply identity")
+	}
 	if !groupEmailPrincipalPattern.MatchString(expectedRecoveryAdministrator) ||
 		!sameStringSet(actualRecoveryAdministrators, stringSet(expectedRecoveryAdministrator)) {
 		*violations = append(*violations, "recovery-administration bindings must exactly equal the single compiled recovery-administrator group")
@@ -2107,6 +2495,7 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 
 	audit, _ := bootstrap["audit"].(map[string]any)
 	expectedReaders := stringSetFromValue(audit["reader_principals"])
+	expectedReaders[principals.recovery] = true
 	actualReaders := map[string]bool{}
 	actualAdmins := map[string]bool{}
 	for _, resource := range resources {
@@ -2121,7 +2510,7 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 		}
 	}
 	if !sameStringSet(actualReaders, expectedReaders) {
-		*violations = append(*violations, "audit reader bindings must exactly equal the compiled human reader groups")
+		*violations = append(*violations, "audit reader bindings must exactly equal the compiled human reader groups plus recovery identity")
 	}
 	expectedAdmins := stringSetFromValue(audit["administrator_principals"])
 	expectedAdmins[principals.apply] = true
@@ -2131,7 +2520,6 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 
 	signingObject, _ := bootstrap["signing"].(map[string]any)
 	expectedSigningAdmins := stringSetFromValue(signingObject["administrators"])
-	expectedSigningAdmins[principals.apply] = true
 	actualSigningAdmins := map[string]bool{}
 	actualSigners := map[string]map[string]bool{}
 	for _, resource := range resources {
@@ -2383,7 +2771,15 @@ func validateIdentityProject(resource resourceChange, after map[string]any, proj
 	switch resource.Type {
 	case "google_iam_workload_identity_pool", "google_iam_workload_identity_pool_provider":
 		if strings.HasPrefix(base, "module.github_federation.") || strings.HasPrefix(base, "module.buildkite_federation.") || strings.HasPrefix(base, "module.gitops_federation.") {
-			requirePlannedProject(resource, after, "project", "identity", projects, violations)
+			logical := "identity"
+			if base == "module.github_federation.google_iam_workload_identity_pool.github" ||
+				base == "module.github_federation.google_iam_workload_identity_pool_provider.github" {
+				instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+				if instance == "recovery" {
+					logical = "recovery"
+				}
+			}
+			requirePlannedProject(resource, after, "project", logical, projects, violations)
 		}
 	case "google_service_account":
 		logical := ""
@@ -2391,6 +2787,14 @@ func validateIdentityProject(resource resourceChange, after map[string]any, proj
 		case "module.github_federation.google_service_account.github":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			logical = map[string]string{"plan": "root_state", "apply": "root_state", "recovery": "recovery"}[instance]
+		case "module.github_federation.google_service_account.ci_evidence":
+			logical = "identity"
+		case "module.github_federation.google_service_account.github_config":
+			logical = "identity"
+		case "module.github_federation.google_service_account.infrastructure_live":
+			logical = "identity"
+		case "module.github_federation.google_service_account.infrastructure_drift":
+			logical = "identity"
 		case "module.buildkite_federation.google_service_account.buildkite":
 			logical = "root_state"
 		case "module.gitops_federation.google_service_account.gitops":
@@ -2405,6 +2809,14 @@ func validateIdentityProject(resource resourceChange, after map[string]any, proj
 		case "module.github_federation.google_service_account_iam_member.github":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			logical = map[string]string{"plan": "root_state", "apply": "root_state", "recovery": "recovery"}[instance]
+		case "module.github_federation.google_service_account_iam_member.ci_evidence":
+			logical = "identity"
+		case "module.github_federation.google_service_account_iam_member.github_config":
+			logical = "identity"
+		case "module.github_federation.google_service_account_iam_member.infrastructure_live":
+			logical = "identity"
+		case "module.github_federation.google_service_account_iam_member.infrastructure_drift":
+			logical = "identity"
 		case "module.buildkite_federation.google_service_account_iam_member.buildkite":
 			logical = "root_state"
 		case "module.gitops_federation.google_service_account_iam_member.gitops":
@@ -2764,7 +3176,8 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 	case "google_iam_workload_identity_pool_provider", "google_iam_workforce_pool_provider":
 		requireEqual(after, "disabled", false, resource.Address, violations)
 		condition, _ := after["attribute_condition"].(string)
-		if unsafeCondition(condition) {
+		ciEvidenceProvider := resourceAddressBase(resource.Address) == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence"
+		if unsafeCondition(condition) && !ciEvidenceProvider {
 			*violations = append(*violations, resource.Address+" must use a fail-closed attribute condition")
 		}
 		mapping, _ := after["attribute_mapping"].(map[string]any)
@@ -2775,8 +3188,15 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 			oidc := firstObject(after["oidc"])
 			issuer, _ := oidc["issuer_uri"].(string)
 			audiences, _ := oidc["allowed_audiences"].([]any)
-			if !strings.HasPrefix(issuer, "https://") || len(audiences) != 1 {
-				*violations = append(*violations, resource.Address+" must use one explicit HTTPS OIDC issuer/audience")
+			ciEvidenceProvider := resourceAddressBase(resource.Address) == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence"
+			validAudienceContract := len(audiences) == 1
+			if ciEvidenceProvider {
+				// Empty allowed_audiences is the Google-defined fail-closed default:
+				// only this provider's canonical resource audiences are accepted.
+				validAudienceContract = len(audiences) == 0
+			}
+			if !strings.HasPrefix(issuer, "https://") || !validAudienceContract {
+				*violations = append(*violations, resource.Address+" must use an HTTPS OIDC issuer and its approved audience contract")
 			}
 		}
 		validateIdentityProviderContract(resource, after, violations)
@@ -2790,6 +3210,8 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 		validateAuditLogBucket(resource, after, violations)
 	case "google_logging_organization_sink":
 		validateAuditOrganizationSink(resource, after, violations)
+	case "google_organization_iam_audit_config":
+		validateStorageDataAccessAuditConfig(resource, after, violations)
 	case "google_storage_bucket_object":
 		content, ok := after["content"].(string)
 		var embedded any
@@ -2808,6 +3230,34 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 	case "google_service_account":
 		validateFederatedServiceAccount(resource, after, violations)
 		validateRecoveryStateExportServiceAccount(resource, after, violations)
+	}
+}
+
+func validateStorageDataAccessAuditConfig(resource resourceChange, after map[string]any, violations *[]string) {
+	if resource.Address != "google_organization_iam_audit_config.storage_data_access" ||
+		!numericIDPattern.MatchString(stringValue(after["org_id"])) || after["service"] != "storage.googleapis.com" ||
+		topLevelUnknown(resource.Change.AfterUnknown, "org_id") || topLevelUnknown(resource.Change.AfterUnknown, "service") {
+		*violations = append(*violations, resource.Address+" must enable Data Access auditing only for Cloud Storage in the exact organization")
+		return
+	}
+	configs, ok := after["audit_log_config"].([]any)
+	if !ok || len(configs) != 2 || nestedUnknown(resource.Change.AfterUnknown, "audit_log_config") {
+		*violations = append(*violations, resource.Address+" must declare exactly DATA_READ and DATA_WRITE audit log configs")
+		return
+	}
+	logTypes := map[string]bool{}
+	for _, raw := range configs {
+		config, ok := raw.(map[string]any)
+		logType, _ := config["log_type"].(string)
+		exempted, _ := config["exempted_members"].([]any)
+		if !ok || len(exempted) != 0 || logTypes[logType] {
+			*violations = append(*violations, resource.Address+" Data Access audit configs must contain no exemptions or duplicates")
+			return
+		}
+		logTypes[logType] = true
+	}
+	if !sameStringSet(logTypes, stringSet("DATA_READ", "DATA_WRITE")) {
+		*violations = append(*violations, resource.Address+" must enable exactly DATA_READ and DATA_WRITE")
 	}
 }
 
@@ -2964,6 +3414,22 @@ func validateFederatedServiceAccount(resource resourceChange, after map[string]a
 		expectedAccountID = map[string]string{
 			"plan": "bootstrap-plan", "apply": "bootstrap-apply", "recovery": "bootstrap-recovery",
 		}[instance]
+	case "module.github_federation.google_service_account.ci_evidence":
+		instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+		expectedAccountID = map[string]string{
+			"writer": "ci-evidence-writer", "verifier": "ci-evidence-verifier",
+		}[instance]
+	case "module.github_federation.google_service_account.github_config":
+		instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+		expectedAccountID = map[string]string{"plan": "github-config-plan", "apply": "github-config-apply"}[instance]
+	case "module.github_federation.google_service_account.infrastructure_live":
+		instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+		expectedAccountID = instance
+	case "module.github_federation.google_service_account.infrastructure_drift":
+		instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+		if instance == "drift" {
+			expectedAccountID = "infrastructure-plan"
+		}
 	case "module.buildkite_federation.google_service_account.buildkite":
 		expectedAccountID = "buildkite-bootstrap"
 	case "module.gitops_federation.google_service_account.gitops":
@@ -2996,6 +3462,12 @@ func validateIdentityPoolContract(resource resourceChange, after map[string]any,
 		if base == "module.github_federation.google_iam_workload_identity_pool.github" {
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-github-"+instance, resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool.ci_evidence" {
+			requireEqual(after, "workload_identity_pool_id", "github-ci-evidence", resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool.github_config" {
+			requireEqual(after, "workload_identity_pool_id", "github-config", resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool.infrastructure_live" {
+			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
 		} else if base == "module.buildkite_federation.google_iam_workload_identity_pool.buildkite" {
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-buildkite", resource.Address, violations)
 		} else if base == "module.gitops_federation.google_iam_workload_identity_pool.gitops" {
@@ -3029,6 +3501,21 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-github-"+instance, resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "github-actions-"+instance, resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" {
+			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+			requireEqual(after, "workload_identity_pool_id", "github-ci-evidence", resource.Address, violations)
+			requireEqual(after, "workload_identity_pool_provider_id", instance, resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" {
+			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+			requireEqual(after, "workload_identity_pool_id", "github-config", resource.Address, violations)
+			requireEqual(after, "workload_identity_pool_provider_id", "github-config-"+instance, resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live" {
+			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
+			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
+			requireEqual(after, "workload_identity_pool_provider_id", instance, resource.Address, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift" {
+			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
+			requireEqual(after, "workload_identity_pool_provider_id", "infrastructure-plan", resource.Address, violations)
 		} else if base == "module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite" {
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-buildkite", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "buildkite", resource.Address, violations)
@@ -3039,7 +3526,11 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 		oidc, _ := singleObject(after["oidc"])
 		issuer, _ := oidc["issuer_uri"].(string)
 		switch base {
-		case "module.github_federation.google_iam_workload_identity_pool_provider.github":
+		case "module.github_federation.google_iam_workload_identity_pool_provider.github",
+			"module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence",
+			"module.github_federation.google_iam_workload_identity_pool_provider.github_config",
+			"module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live",
+			"module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift":
 			if issuer != "https://token.actions.githubusercontent.com" {
 				*violations = append(*violations, resource.Address+" must use the canonical GitHub Actions issuer")
 			}
@@ -3052,7 +3543,17 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 				*violations = append(*violations, resource.Address+" GitOps issuer must use HTTPS")
 			}
 		}
-		validateWorkloadProviderClaims(resource, after, base, violations)
+		if base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" {
+			validateCIEvidenceProviderClaims(resource, after, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" {
+			validateGithubConfigProviderClaims(resource, after, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live" {
+			validateInfrastructureProviderClaims(resource, after, violations)
+		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift" {
+			validateInfrastructureDriftProviderClaims(resource, after, violations)
+		} else {
+			validateWorkloadProviderClaims(resource, after, base, violations)
+		}
 		return
 	}
 	poolID, _ := after["workforce_pool_id"].(string)
@@ -3073,16 +3574,182 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 	validateWorkforceProviderClaims(resource, after, violations)
 }
 
+func validateCIEvidenceProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
+	base := "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence"
+	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+	commonMapping := map[string]string{
+		"google.subject":                  "assertion.sub",
+		"attribute.evidence_role":         "'" + instance + "'",
+		"attribute.repository_id":         "assertion.repository_id",
+		"attribute.repository_owner_id":   "assertion.repository_owner_id",
+		"attribute.ref":                   "assertion.ref",
+		"attribute.event_name":            "assertion.event_name",
+		"attribute.repository_visibility": "assertion.repository_visibility",
+		"attribute.runner_environment":    "assertion.runner_environment",
+	}
+	expectedMapping := map[string]string{}
+	for key, value := range commonMapping {
+		expectedMapping[key] = value
+	}
+	condition, _ := after["attribute_condition"].(string)
+	validCondition := false
+	switch instance {
+	case "writer":
+		expectedMapping["attribute.job_workflow_ref"] = "assertion.job_workflow_ref"
+		expectedMapping["attribute.job_workflow_sha"] = "assertion.job_workflow_sha"
+		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id in \['1350980188', '1350986053', '1350990078', '1350991612', '1350991963', '1350992171'\] && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.job_workflow_ref == 'mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})' && assertion\.job_workflow_sha == '([0-9a-f]{40})' && \(\(assertion\.event_name == 'push' && assertion\.ref == 'refs/heads/main'\) \|\| \(assertion\.event_name == 'release' && assertion\.ref\.startsWith\('refs/tags/v'\)\)\)$`)
+		matches := pattern.FindStringSubmatch(condition)
+		validCondition = len(matches) == 3 && matches[1] == matches[2]
+	case "verifier":
+		expectedMapping["attribute.workflow_ref"] = "assertion.workflow_ref"
+		expectedMapping["attribute.workflow_sha"] = "assertion.workflow_sha"
+		expectedMapping["attribute.environment"] = "assertion.environment"
+		pattern := regexp.MustCompile(`^assertion\.repository_owner_id == '316676129' && assertion\.repository_id == '1350992171' && assertion\.repository_visibility in \['internal', 'private'\] && assertion\.runner_environment == 'github-hosted' && assertion\.workflow_ref == 'mindclade/infrastructure-live/\.github/workflows/disaster-recovery\.yml@refs/heads/main' && assertion\.workflow_sha == '[0-9a-f]{40}' && assertion\.ref == 'refs/heads/main' && assertion\.event_name == 'workflow_dispatch' && assertion\.environment == 'infrastructure-apply'$`)
+		validCondition = pattern.MatchString(condition)
+	}
+	oidc := firstObject(after["oidc"])
+	if !indexed || !exactStringMap(after["attribute_mapping"], expectedMapping) || !validCondition || !plannedUnset(oidc["allowed_audiences"]) {
+		*violations = append(*violations, resource.Address+" must bind its exact immutable CI-evidence claims and static evidence role")
+	}
+}
+
+func validateGithubConfigProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
+	base := "module.github_federation.google_iam_workload_identity_pool_provider.github_config"
+	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+	expectedMapping := map[string]string{
+		"google.subject":                  "assertion.sub",
+		"attribute.repo":                  "assertion.repo",
+		"attribute.repository_id":         "assertion.repository_id",
+		"attribute.repository_owner_id":   "assertion.repository_owner_id",
+		"attribute.ref":                   "assertion.ref",
+		"attribute.workflow_ref":          "assertion.workflow_ref",
+		"attribute.workflow_sha":          "assertion.workflow_sha",
+		"attribute.environment":           "assertion.environment",
+		"attribute.repository_visibility": "assertion.repository_visibility",
+		"attribute.runner_environment":    "assertion.runner_environment",
+	}
+	oidc := firstObject(after["oidc"])
+	if !indexed || !stringSet("plan", "apply")[instance] || !exactStringMap(after["attribute_mapping"], expectedMapping) ||
+		after["attribute_condition"] != githubConfigProviderCondition(instance) ||
+		!exactStringSet(oidc["allowed_audiences"], []string{"sts.googleapis.com"}) {
+		*violations = append(*violations, resource.Address+" must bind the exact github-config immutable custom subjects and singleton audience")
+	}
+}
+
+func githubConfigProviderCondition(instance string) string {
+	base := []string{
+		"assertion.repo == 'mindclade@316676129/github-config@1350986053'",
+		"assertion.repository == 'mindclade/github-config'",
+		"assertion.repository_owner == 'mindclade'",
+		"assertion.repository_owner_id == '316676129'",
+		"assertion.repository_id == '1350986053'",
+		"assertion.repository_visibility == 'private'",
+		"assertion.runner_environment == 'github-hosted'",
+	}
+	subject := func(workflowRef, contextType, contextValue string) string {
+		contextPredicate := fmt.Sprintf("assertion.%s == '%s'", contextType, contextValue)
+		return "(" + strings.Join([]string{
+			fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/github-config@1350986053:context:%s%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", contextType, contextValue, workflowRef),
+			fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
+			"assertion.workflow_sha == assertion.sha",
+			contextPredicate,
+		}, " && ") + ")"
+	}
+	conditions := []string{}
+	if instance == "plan" {
+		conditions = []string{
+			subject("mindclade/github-config/.github/workflows/drift-detection.yml@refs/heads/main", "ref", "refs/heads/main"),
+			subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "trusted-build"),
+		}
+	} else if instance == "apply" {
+		conditions = []string{subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "infrastructure-apply")}
+	}
+	return strings.Join(append(base, "("+strings.Join(conditions, " || ")+")"), " && ")
+}
+
+func validateInfrastructureDriftProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
+	expectedMapping := map[string]string{
+		"google.subject":                    "assertion.sub",
+		"attribute.infrastructure_identity": "'drift-plan'",
+		"attribute.repo":                    "assertion.repo",
+		"attribute.repository_id":           "assertion.repository_id",
+		"attribute.repository_owner_id":     "assertion.repository_owner_id",
+		"attribute.workflow_ref":            "assertion.workflow_ref",
+		"attribute.workflow_sha":            "assertion.workflow_sha",
+		"attribute.environment":             "assertion.environment",
+	}
+	oidc := firstObject(after["oidc"])
+	if !exactStringMap(after["attribute_mapping"], expectedMapping) ||
+		after["attribute_condition"] != infrastructureDriftProviderCondition() ||
+		!exactStringSet(oidc["allowed_audiences"], []string{"sts.googleapis.com"}) {
+		*violations = append(*violations, resource.Address+" must bind the exact infrastructure drift custom subject and singleton audience")
+	}
+}
+
+func infrastructureDriftProviderCondition() string {
+	workflowRef := "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main"
+	return strings.Join([]string{
+		fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/infrastructure-live@1350992171:context:environment%%3Atrusted-build:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", workflowRef),
+		"assertion.repo == 'mindclade@316676129/infrastructure-live@1350992171'",
+		"assertion.repository == 'mindclade/infrastructure-live'",
+		"assertion.repository_owner == 'mindclade'",
+		"assertion.repository_owner_id == '316676129'",
+		"assertion.repository_id == '1350992171'",
+		"assertion.repository_visibility == 'private'",
+		"assertion.ref == 'refs/heads/main'",
+		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
+		"assertion.workflow_sha == assertion.sha",
+		"assertion.environment == 'trusted-build'",
+		"assertion.runner_environment == 'github-hosted'",
+	}, " && ")
+}
+
+func validateInfrastructureProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
+	base := "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live"
+	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+	identityParts := strings.Split(instance, "-")
+	if !indexed || len(identityParts) != 2 || !stringSet("development", "staging", "production", "restricted")[identityParts[0]] ||
+		!stringSet("plan", "apply")[identityParts[1]] {
+		*violations = append(*violations, resource.Address+" must be one of the exact eight infrastructure-live identities")
+		return
+	}
+	environment := "trusted-build"
+	if identityParts[1] == "apply" {
+		environment = "infrastructure-apply"
+	}
+	declaration := map[string]any{
+		"immutable_repository": "mindclade@316676129/infrastructure-live@1350992171",
+		"repository_full_name": "mindclade/infrastructure-live",
+		"repository_owner_id":  "316676129",
+		"repository_id":        "1350992171",
+		"branch_ref":           "refs/heads/main",
+		"workflow_ref":         "mindclade/infrastructure-live/.github/workflows/protected-apply.yml@refs/heads/main",
+	}
+	expectedMapping := map[string]string{
+		"google.subject":                    "assertion.sub",
+		"attribute.infrastructure_identity": "'" + instance + "'",
+		"attribute.repo":                    "assertion.repo",
+		"attribute.repository_id":           "assertion.repository_id",
+		"attribute.repository_owner_id":     "assertion.repository_owner_id",
+		"attribute.workflow_ref":            "assertion.workflow_ref",
+		"attribute.workflow_sha":            "assertion.workflow_sha",
+		"attribute.environment":             "assertion.environment",
+	}
+	oidc := firstObject(after["oidc"])
+	expectedAudience := "https://github.mindclade.io/oidc/infrastructure-live/" + identityParts[0] + "/" + identityParts[1]
+	if !exactStringMap(after["attribute_mapping"], expectedMapping) ||
+		after["attribute_condition"] != infrastructureProviderCondition(declaration, environment) ||
+		!exactStringSet(oidc["allowed_audiences"], []string{expectedAudience}) {
+		*violations = append(*violations, resource.Address+" must bind its exact immutable custom subject, source SHA, execution environment, and singleton audience")
+	}
+}
+
 func validateWorkloadProviderClaims(resource resourceChange, after map[string]any, base string, violations *[]string) {
+	if base == "module.github_federation.google_iam_workload_identity_pool_provider.github" {
+		validateBootstrapProviderClaims(resource, after, violations)
+		return
+	}
 	mappingContracts := map[string]map[string]string{
-		"module.github_federation.google_iam_workload_identity_pool_provider.github": {
-			"google.subject":                "assertion.sub",
-			"attribute.repository_id":       "assertion.repository_id",
-			"attribute.repository_owner_id": "assertion.repository_owner_id",
-			"attribute.ref":                 "assertion.ref",
-			"attribute.workflow_ref":        "assertion.workflow_ref",
-			"attribute.environment":         "assertion.environment",
-		},
 		"module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite": {
 			"google.subject":              "assertion.sub",
 			"attribute.organization_slug": "assertion.organization_slug",
@@ -3104,25 +3771,6 @@ func validateWorkloadProviderClaims(resource resourceChange, after map[string]an
 	claims, ok := parseExactClaimConjunction(condition)
 	expectedClaims := map[string]bool{}
 	switch base {
-	case "module.github_federation.google_iam_workload_identity_pool_provider.github":
-		expectedClaims = stringSet("sub", "repository_id", "repository_owner_id", "ref", "workflow_ref", "environment")
-		instance, _, _ := terraformAddressStringIndex(resource.Address, base)
-		expectedEnvironment := map[string]string{"plan": "infrastructure-plan", "apply": "infrastructure-apply", "recovery": "recovery-verification"}[instance]
-		expectedWorkflow := "protected-apply.yml"
-		if instance == "recovery" {
-			expectedWorkflow = "recovery-verification.yml"
-		}
-		workflow := claims["workflow_ref"]
-		workflowMarker := "/.github/workflows/"
-		repository := strings.SplitN(workflow, workflowMarker, 2)[0]
-		repositoryParts := strings.Split(repository, "/")
-		expectedSubject := ""
-		if len(repositoryParts) == 2 {
-			expectedSubject = fmt.Sprintf("repo:%s@%s/%s@%s:environment:%s", repositoryParts[0], claims["repository_owner_id"], repositoryParts[1], claims["repository_id"], expectedEnvironment)
-		}
-		ok = ok && numericIDPattern.MatchString(claims["repository_id"]) && numericIDPattern.MatchString(claims["repository_owner_id"]) &&
-			claims["ref"] == "refs/heads/main" && claims["environment"] == expectedEnvironment &&
-			strings.HasSuffix(workflow, workflowMarker+expectedWorkflow+"@refs/heads/main") && claims["sub"] == expectedSubject
 	case "module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite":
 		expectedClaims = stringSet("sub", "organization_slug", "pipeline_slug", "pipeline_id", "build_branch", "step_key")
 		ok = ok && regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`).MatchString(claims["pipeline_id"]) &&
@@ -3139,6 +3787,41 @@ func validateWorkloadProviderClaims(resource resourceChange, after map[string]an
 		if !expectedClaims[claim] {
 			*violations = append(*violations, resource.Address+" contains an unapproved workload-identity claim predicate")
 		}
+	}
+}
+
+func validateBootstrapProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
+	base := "module.github_federation.google_iam_workload_identity_pool_provider.github"
+	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+	environment := map[string]string{"plan": "trusted-build", "apply": "infrastructure-apply", "recovery": "infrastructure-apply"}[instance]
+	workflowRef := "mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main"
+	if instance == "recovery" {
+		workflowRef = "mindclade/bootstrap/.github/workflows/recovery-verification.yml@refs/heads/main"
+	}
+	github := map[string]any{
+		"repository_full_name": "mindclade/bootstrap",
+		"repository_owner_id":  "316676129",
+		"repository_id":        "1350991612",
+		"branch_ref":           "refs/heads/main",
+	}
+	expectedMapping := map[string]string{
+		"google.subject":                  "assertion.sub",
+		"attribute.repo":                  "assertion.repo",
+		"attribute.repository_id":         "assertion.repository_id",
+		"attribute.repository_owner_id":   "assertion.repository_owner_id",
+		"attribute.ref":                   "assertion.ref",
+		"attribute.workflow_ref":          "assertion.workflow_ref",
+		"attribute.workflow_sha":          "assertion.workflow_sha",
+		"attribute.environment":           "assertion.environment",
+		"attribute.event_name":            "assertion.event_name",
+		"attribute.repository_visibility": "assertion.repository_visibility",
+		"attribute.runner_environment":    "assertion.runner_environment",
+	}
+	oidc := firstObject(after["oidc"])
+	if !indexed || environment == "" || !exactStringMap(after["attribute_mapping"], expectedMapping) ||
+		after["attribute_condition"] != bootstrapProviderCondition(github, environment, workflowRef) ||
+		!exactStringSet(oidc["allowed_audiences"], []string{"sts.googleapis.com"}) {
+		*violations = append(*violations, resource.Address+" must bind the exact immutable bootstrap custom subject, source SHA, protected workflow/environment, self-hosted runner, and organization-approved audience")
 	}
 }
 
@@ -3243,7 +3926,79 @@ func validateFederationClaimGraph(resources []resourceChange, violations *[]stri
 			if !indexed {
 				continue
 			}
-			providerKey, poolID, attribute, claim = "github:"+instance, "bootstrap-github-"+instance, "repository_id", "repository_id"
+			after, _ := resource.Change.After.(map[string]any)
+			member, _ := after["member"].(string)
+			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
+				continue
+			}
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/bootstrap-github-` + regexp.QuoteMeta(instance) + `/attribute\.repository_id/1350991612$`)
+			if !pattern.MatchString(member) {
+				*violations = append(*violations, resource.Address+" principalSet must bind only the exact bootstrap repository ID")
+			}
+			continue
+		case "module.github_federation.google_service_account_iam_member.ci_evidence":
+			instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+			if !indexed || (instance != "writer" && instance != "verifier") {
+				continue
+			}
+			after, _ := resource.Change.After.(map[string]any)
+			member, _ := after["member"].(string)
+			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
+				continue
+			}
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/github-ci-evidence/attribute\.evidence_role/` + regexp.QuoteMeta(instance) + `$`)
+			if !pattern.MatchString(member) {
+				*violations = append(*violations, resource.Address+" principalSet must bind only its static CI-evidence provider role")
+			}
+			continue
+		case "module.github_federation.google_service_account_iam_member.github_config":
+			instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+			if !indexed || !stringSet("plan", "apply")[instance] {
+				continue
+			}
+			after, _ := resource.Change.After.(map[string]any)
+			member, _ := after["member"].(string)
+			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
+				continue
+			}
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/github-config/attribute\.repository_id/1350986053$`)
+			if !pattern.MatchString(member) {
+				*violations = append(*violations, resource.Address+" principalSet must bind only the exact github-config repository ID")
+			}
+			continue
+		case "module.github_federation.google_service_account_iam_member.infrastructure_live":
+			instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+			if !indexed || !stringSet(
+				"development-plan", "development-apply", "staging-plan", "staging-apply",
+				"production-plan", "production-apply", "restricted-plan", "restricted-apply",
+			)[instance] {
+				continue
+			}
+			after, _ := resource.Change.After.(map[string]any)
+			member, _ := after["member"].(string)
+			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
+				continue
+			}
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/infrastructure-live/attribute\.infrastructure_identity/` + regexp.QuoteMeta(instance) + `$`)
+			if !pattern.MatchString(member) {
+				*violations = append(*violations, resource.Address+" principalSet must bind only its static infrastructure-live environment/role identity")
+			}
+			continue
+		case "module.github_federation.google_service_account_iam_member.infrastructure_drift":
+			instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
+			if !indexed || instance != "drift" {
+				continue
+			}
+			after, _ := resource.Change.After.(map[string]any)
+			member, _ := after["member"].(string)
+			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
+				continue
+			}
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/infrastructure-live/attribute\.infrastructure_identity/drift-plan$`)
+			if !pattern.MatchString(member) {
+				*violations = append(*violations, resource.Address+" principalSet must bind only the exact infrastructure drift identity")
+			}
+			continue
 		case "module.buildkite_federation.google_service_account_iam_member.buildkite":
 			providerKey, poolID, attribute, claim = "buildkite", "bootstrap-buildkite", "pipeline_id", "pipeline_id"
 		case "module.gitops_federation.google_service_account_iam_member.gitops":
@@ -3625,14 +4380,16 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 		if !numericIDPattern.MatchString(orgID) {
 			*violations = append(*violations, resource.Address+" must target one explicit organization")
 		}
-		expectedPrincipal := bootstrapPlanPrincipalPattern
-		if strings.Contains(base, ".apply_") {
-			expectedPrincipal = bootstrapApplyPrincipalPattern
-		} else if strings.Contains(base, ".recovery_") {
-			expectedPrincipal = bootstrapRecoveryPrincipalPattern
+		validPrincipal := bootstrapPlanPrincipalPattern.MatchString(member)
+		principalDescription := "compiler-derived bootstrap identity"
+		if strings.Contains(base, ".recovery_") {
+			validPrincipal = bootstrapRecoveryPrincipalPattern.MatchString(member)
+		} else if strings.Contains(base, ".apply_") {
+			validPrincipal = groupEmailPrincipalPattern.MatchString(member)
+			principalDescription = "independent named root-administrator group, never bootstrap-apply"
 		}
-		if !expectedPrincipal.MatchString(member) || topLevelUnknown(resource.Change.AfterUnknown, "member") {
-			*violations = append(*violations, resource.Address+" must bind only its compiler-derived bootstrap identity")
+		if !validPrincipal || topLevelUnknown(resource.Change.AfterUnknown, "member") {
+			*violations = append(*violations, resource.Address+" must bind only its "+principalDescription)
 		}
 		customRoleID := ""
 		if base == "google_organization_iam_member.plan_read" {
@@ -3734,6 +4491,14 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 		validateSigningIAMCondition(resource, after, instance, indexed, violations)
 	case "module.github_federation.google_service_account_iam_member.github":
 		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.repository_id", violations)
+	case "module.github_federation.google_service_account_iam_member.ci_evidence":
+		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.evidence_role", violations)
+	case "module.github_federation.google_service_account_iam_member.github_config":
+		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.repository_id", violations)
+	case "module.github_federation.google_service_account_iam_member.infrastructure_live":
+		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.infrastructure_identity", violations)
+	case "module.github_federation.google_service_account_iam_member.infrastructure_drift":
+		validateFederationServiceAccountBinding(resource, after, "infrastructure-plan", indexed && instance == "drift", "attribute.infrastructure_identity", violations)
 	case "module.buildkite_federation.google_service_account_iam_member.buildkite":
 		validateFederationServiceAccountBinding(resource, after, "buildkite-bootstrap", true, "attribute.pipeline_id", violations)
 	case "module.gitops_federation.google_service_account_iam_member.gitops":
@@ -3743,8 +4508,13 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 
 func validateFederationServiceAccountBinding(resource resourceChange, after map[string]any, instance string, indexed bool, attribute string, violations *[]string) {
 	expectedAccountID := instance
-	if strings.HasPrefix(resource.Address, "module.github_federation.") {
+	base := resourceAddressBase(resource.Address)
+	if base == "module.github_federation.google_service_account_iam_member.github" {
 		expectedAccountID = map[string]string{"plan": "bootstrap-plan", "apply": "bootstrap-apply", "recovery": "bootstrap-recovery"}[instance]
+	} else if base == "module.github_federation.google_service_account_iam_member.ci_evidence" {
+		expectedAccountID = map[string]string{"writer": "ci-evidence-writer", "verifier": "ci-evidence-verifier"}[instance]
+	} else if base == "module.github_federation.google_service_account_iam_member.github_config" {
+		expectedAccountID = map[string]string{"plan": "github-config-plan", "apply": "github-config-apply"}[instance]
 	}
 	serviceAccountID, _ := after["service_account_id"].(string)
 	parts := strings.Split(serviceAccountID, "/")
@@ -4031,6 +4801,10 @@ func approvedBinding(resourceType, address, role string) bool {
 			return roleMatchesContract(role, contract)
 		}
 		return roles("roles/iam.workloadIdentityUser") && (base == "module.github_federation.google_service_account_iam_member.github" ||
+			base == "module.github_federation.google_service_account_iam_member.ci_evidence" ||
+			base == "module.github_federation.google_service_account_iam_member.github_config" ||
+			base == "module.github_federation.google_service_account_iam_member.infrastructure_live" ||
+			base == "module.github_federation.google_service_account_iam_member.infrastructure_drift" ||
 			base == "module.buildkite_federation.google_service_account_iam_member.buildkite" ||
 			base == "module.gitops_federation.google_service_account_iam_member.gitops")
 	case "google_storage_bucket_iam_member":
@@ -4175,8 +4949,12 @@ func validateStateBackendAccessContract(resource resourceChange, after map[strin
 		}
 	} else if strings.Contains(instance, "-apply") {
 		member, _ := after["member"].(string)
-		if !bootstrapApplyPrincipalPattern.MatchString(member) || topLevelUnknown(resource.Change.AfterUnknown, "member") {
-			*violations = append(*violations, resource.Address+" must bind the exact bootstrap-apply service account")
+		expected := bootstrapApplyPrincipalPattern.MatchString(member)
+		if module == "module.recovery_state" {
+			expected = groupEmailPrincipalPattern.MatchString(member)
+		}
+		if !expected || topLevelUnknown(resource.Change.AfterUnknown, "member") {
+			*violations = append(*violations, resource.Address+" must bind the root apply identity or independent recovery-administrator group selected for that backend")
 		}
 	} else if strings.Contains(instance, "-recovery") {
 		member, _ := after["member"].(string)
@@ -4185,7 +4963,7 @@ func validateStateBackendAccessContract(resource resourceChange, after map[strin
 		}
 	}
 	conditionRequired := instance == "primary-plan-state" || instance == "replica-plan-state" ||
-		instance == "primary-plan-lock" || instance == "primary-recovery" || instance == "replica-recovery"
+		instance == "primary-plan-lock" || instance == "primary-apply" || instance == "primary-recovery" || instance == "replica-recovery"
 	if !conditionRequired {
 		if !plannedUnset(after["condition"]) || nestedUnknown(resource.Change.AfterUnknown, "condition") {
 			*violations = append(*violations, resource.Address+" must not vary from its unconditional bucket-access contract")
@@ -4208,10 +4986,15 @@ func validateStateBackendAccessContract(resource resourceChange, after map[strin
 	if instance == "primary-plan-lock" {
 		title = "bootstrap-plan-primary-lock"
 		objectName = strings.TrimSuffix(objectName, "default.tfstate") + "default.tflock"
+	} else if instance == "primary-apply" {
+		title = "bootstrap-apply-primary-state-and-lock"
 	} else if strings.HasSuffix(instance, "-recovery") {
 		title = "bootstrap-recovery-" + strings.TrimSuffix(instance, "-recovery") + "-state-read"
 	}
 	expression := fmt.Sprintf("resource.name == 'projects/_/buckets/%s/objects/%s'", bucket, objectName)
+	if instance == "primary-apply" {
+		expression += fmt.Sprintf(" || resource.name == 'projects/_/buckets/%s/objects/%s'", bucket, strings.TrimSuffix(objectName, "default.tfstate")+"default.tflock")
+	}
 	if condition["title"] != title {
 		*violations = append(*violations, fmt.Sprintf("%s must use IAM condition title %s", resource.Address, title))
 	}
@@ -5591,6 +6374,10 @@ func allowedUnknownSecurityValue(resource resourceChange, key string) bool {
 		}
 		return role == "roles/iam.workloadIdentityUser" && (base == "module.buildkite_federation.google_service_account_iam_member.buildkite" ||
 			base == "module.github_federation.google_service_account_iam_member.github" ||
+			base == "module.github_federation.google_service_account_iam_member.ci_evidence" ||
+			base == "module.github_federation.google_service_account_iam_member.github_config" ||
+			base == "module.github_federation.google_service_account_iam_member.infrastructure_live" ||
+			base == "module.github_federation.google_service_account_iam_member.infrastructure_drift" ||
 			base == "module.gitops_federation.google_service_account_iam_member.gitops")
 	case "google_storage_bucket_iam_member":
 		if _, _, ok := replicationBindingContract(resource.Type, resource.Address); ok {

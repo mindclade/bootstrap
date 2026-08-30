@@ -26,11 +26,13 @@
         "keys": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["bootstrap-handoff", "audit-anchor", "recovery-evidence"],
+          "required": ["bootstrap-handoff", "audit-anchor", "recovery-evidence", "github-config-plan-evidence", "infrastructure-export"],
           "properties": {
             "bootstrap-handoff": {"$ref": "#/$defs/key"},
             "audit-anchor": {"$ref": "#/$defs/key"},
-            "recovery-evidence": {"$ref": "#/$defs/key"}
+            "recovery-evidence": {"$ref": "#/$defs/key"},
+            "github-config-plan-evidence": {"$ref": "#/$defs/key"},
+            "infrastructure-export": {"$ref": "#/$defs/key"}
           }
         }
       }

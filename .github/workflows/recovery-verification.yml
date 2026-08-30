@@ -5,11 +5,23 @@ name: recovery-verification
     - cron: "17 7 1 1,4,7,10 *"
   workflow_dispatch:
     inputs:
-      connected:
-        description: Also perform federated, read-only recovery-plane checks and KMS-sign the evidence
+      observe_controls:
+        description: Run a non-qualifying read-only control observation on the isolated runner
         required: false
         default: false
         type: boolean
+      approval_receipt_b64:
+        description: Canonical two-approver observation receipt JSON encoded as base64
+        required: false
+        type: string
+      approval_signature_1_b64:
+        description: First detached ECDSA P-256 signature encoded as base64
+        required: false
+        type: string
+      approval_signature_2_b64:
+        description: Second detached ECDSA P-256 signature encoded as base64
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -142,13 +154,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  connected:
-    name: connected-read-only-verification
-    if: github.event_name == 'workflow_dispatch' && inputs.connected
+  observation:
+    name: non-qualifying-control-observation
+    if: github.event_name == 'workflow_dispatch' && inputs.observe_controls
     needs: offline
-    runs-on: ubuntu-24.04
+    runs-on:
+      group: mindclade-ring0-protected
+      labels:
+        - self-hosted
+        - mindclade-ring0-ephemeral
     timeout-minutes: 45
-    environment: recovery-verification
+    environment: infrastructure-apply
     permissions:
       contents: read
       id-token: write
@@ -170,6 +186,8 @@ jobs:
       WIF_PROVIDER: ${{ vars.GCP_RECOVERY_WORKLOAD_IDENTITY_PROVIDER }}
       WIF_SERVICE_ACCOUNT: ${{ vars.GCP_RECOVERY_SERVICE_ACCOUNT }}
       WIF_AUDIENCE: ${{ vars.GCP_RECOVERY_OIDC_AUDIENCE }}
+      APPROVER_PUBLIC_KEY_1_B64: ${{ vars.BOOTSTRAP_RECOVERY_APPROVER_PUBLIC_KEY_1_B64 }}
+      APPROVER_PUBLIC_KEY_2_B64: ${{ vars.BOOTSTRAP_RECOVERY_APPROVER_PUBLIC_KEY_2_B64 }}
     steps:
       - name: Check out the exact verified source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -230,6 +248,51 @@ jobs:
               | tr -d ' '
           )" -eq 6
 
+      - name: Set up Go for approval verification
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Verify the expiry-bound two-person observation approval
+        shell: bash
+        env:
+          APPROVAL_RECEIPT_B64: ${{ inputs.approval_receipt_b64 }}
+          APPROVAL_SIGNATURE_1_B64: ${{ inputs.approval_signature_1_b64 }}
+          APPROVAL_SIGNATURE_2_B64: ${{ inputs.approval_signature_2_b64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          approval_dir="${RUNNER_TEMP}/approval"
+          mkdir -m 0700 "${approval_dir}"
+          for name in \
+            APPROVAL_RECEIPT_B64 APPROVAL_SIGNATURE_1_B64 APPROVAL_SIGNATURE_2_B64 \
+            APPROVER_PUBLIC_KEY_1_B64 APPROVER_PUBLIC_KEY_2_B64; do
+            test -n "${!name}"
+            [[ "${!name}" =~ ^[A-Za-z0-9+/=]+$ ]]
+          done
+          printf '%s' "${APPROVAL_RECEIPT_B64}" | base64 --decode >"${approval_dir}/receipt.json"
+          printf '%s' "${APPROVAL_SIGNATURE_1_B64}" | base64 --decode >"${approval_dir}/signature-1.bin"
+          printf '%s' "${APPROVAL_SIGNATURE_2_B64}" | base64 --decode >"${approval_dir}/signature-2.bin"
+          printf '%s' "${APPROVER_PUBLIC_KEY_1_B64}" | base64 --decode >"${approval_dir}/public-key-1.pem"
+          printf '%s' "${APPROVER_PUBLIC_KEY_2_B64}" | base64 --decode >"${approval_dir}/public-key-2.pem"
+          chmod 0600 "${approval_dir}"/*
+          go -C tooling build -trimpath -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
+          restore_manifest_sha256="$(sha256sum recovery/restore-manifest.yaml | cut -d ' ' -f1)"
+          "${RUNNER_TEMP}/bootstrapctl" approval verify \
+            --receipt "${approval_dir}/receipt.json" \
+            --public-key-1 "${approval_dir}/public-key-1.pem" \
+            --public-key-2 "${approval_dir}/public-key-2.pem" \
+            --signature-1 "${approval_dir}/signature-1.bin" \
+            --signature-2 "${approval_dir}/signature-2.bin" \
+            --operation recovery-observation \
+            --source-sha "${GITHUB_SHA}" \
+            --root recovery-verification \
+            --subject-kind recovery-restore-manifest \
+            --subject-sha256 "${restore_manifest_sha256}" \
+            --plan-run-id none \
+            >"${approval_dir}/verification.json"
+
       - name: Authenticate the isolated recovery identity
         id: recovery-auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -272,6 +335,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          printf 'OBSERVATION_STARTED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"${GITHUB_ENV}"
           inventory="${RUNNER_TEMP}/recovery-inventory"
           mkdir -m 0700 "${inventory}"
           : >"${inventory}/state-observations.ndjson"
@@ -279,6 +343,8 @@ jobs:
           for sink_spec in \
             'bootstrap-admin-activity|primary|log_id("cloudaudit.googleapis.com/activity")' \
             'bootstrap-admin-activity-recovery|recovery|log_id("cloudaudit.googleapis.com/activity")' \
+            'bootstrap-data-access|primary|log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"' \
+            'bootstrap-data-access-recovery|recovery|log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"' \
             'bootstrap-security-events|primary|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"' \
             'bootstrap-security-events-recovery|recovery|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"'; do
             IFS='|' read -r sink_name destination_class expected_filter <<<"${sink_spec}"
@@ -315,7 +381,7 @@ jobs:
               "${sink_file}" >/dev/null
             printf '%s\n' "${sink_file}" >>"${inventory}/audit-sink-files.txt"
           done
-          test "$(wc -l <"${inventory}/audit-sink-files.txt" | tr -d ' ')" -eq 4
+          test "$(wc -l <"${inventory}/audit-sink-files.txt" | tr -d ' ')" -eq 6
           test "$({
             while IFS= read -r sink_file; do
               jq -er '.writerIdentity' "${sink_file}"
@@ -328,8 +394,18 @@ jobs:
           } | LC_ALL=C sort | sha256sum | cut -d ' ' -f1)"
           jq -n \
             --arg configurationSha256 "${audit_sink_configuration_sha256}" \
-            '{count: 4, exactConfigurationVerified: true, allEnabled: true, sharedOrganizationWriterIdentity: true, configurationSha256: $configurationSha256}' \
+            '{count: 6, exactConfigurationVerified: true, allEnabled: true, sharedOrganizationWriterIdentity: true, configurationSha256: $configurationSha256}' \
             >"${inventory}/audit-sink-observations.json"
+          gcloud organizations get-iam-policy "${ORGANIZATION_ID}" \
+            --format=json \
+            >"${inventory}/organization-iam-policy.json" \
+            2>"${inventory}/organization-iam-policy.stderr"
+          jq -e '
+            [(.auditConfigs // [])[] | select(.service == "storage.googleapis.com")] as $configs
+            | ($configs | length) == 1
+            and (($configs[0].auditLogConfigs | map(.logType) | sort) == ["DATA_READ", "DATA_WRITE"])
+            and all($configs[0].auditLogConfigs[]; ((.exemptedMembers // []) | length) == 0)
+          ' "${inventory}/organization-iam-policy.json" >/dev/null
           select_latest_generation() {
             local bucket="$1"
             local object="$2"
@@ -661,14 +737,59 @@ jobs:
               }
             ' >"${RUNNER_TEMP}/recovery-control-summary.json"
 
-      - name: Render and KMS-sign redacted connected evidence
+      - name: Require recent Storage Data Access delivery in both retained audit views
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          inventory="${RUNNER_TEMP}/recovery-inventory"
+          test -n "${OBSERVATION_STARTED_AT}"
+          [[ "${OBSERVATION_STARTED_AT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          filter="log_id(\"cloudaudit.googleapis.com/data_access\") AND protoPayload.serviceName=\"storage.googleapis.com\" AND protoPayload.authenticationInfo.principalEmail=\"${WIF_SERVICE_ACCOUNT}\" AND timestamp>=\"${OBSERVATION_STARTED_AT}\""
+          for view_spec in \
+            "primary|${AUDIT_PROJECT_ID}|us-central1|bootstrap-audit-primary" \
+            "recovery|${RECOVERY_PROJECT_ID}|us-east4|bootstrap-audit-recovery"; do
+            IFS='|' read -r view_name project location bucket <<<"${view_spec}"
+            result="${inventory}/data-access-delivery-${view_name}.json"
+            delivered=false
+            for _ in $(seq 1 30); do
+              gcloud logging read "${filter}" \
+                --project="${project}" \
+                --location="${location}" \
+                --bucket="${bucket}" \
+                --view=_AllLogs \
+                --limit=1 \
+                --format=json \
+                >"${result}" \
+                2>"${inventory}/data-access-delivery-${view_name}.stderr"
+              if jq -e 'type == "array" and length > 0' "${result}" >/dev/null; then
+                delivered=true
+                break
+              fi
+              sleep 10
+            done
+            test "${delivered}" = true
+          done
+          jq -n \
+            --arg observedAfter "${OBSERVATION_STARTED_AT}" \
+            '{storageDataAccessConfigured: true, primaryDeliveryObserved: true, recoveryDeliveryObserved: true, observedAfter: $observedAfter}' \
+            >"${inventory}/data-access-delivery-summary.json"
+          jq \
+            --slurpfile delivery "${inventory}/data-access-delivery-summary.json" \
+            '. + {dataAccessAudit: $delivery[0]}' \
+            "${RUNNER_TEMP}/recovery-control-summary.json" \
+            >"${RUNNER_TEMP}/recovery-control-summary.next.json"
+          mv "${RUNNER_TEMP}/recovery-control-summary.next.json" \
+            "${RUNNER_TEMP}/recovery-control-summary.json"
+
+      - name: Render and KMS-sign redacted non-qualifying observation evidence
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           umask 077
-          bundle="${RUNNER_TEMP}/connected-evidence"
+          bundle="${RUNNER_TEMP}/observation-evidence"
           mkdir -m 0700 "${bundle}"
           cp "${RUNNER_TEMP}/recovery-control-summary.json" "${bundle}/control-summary.json"
           control_summary_digest="$(sha256sum "${bundle}/control-summary.json" | cut -d ' ' -f1)"
@@ -683,8 +804,8 @@ jobs:
           public_key_digest="$(sha256sum "${bundle}/public-key.pem" | cut -d ' ' -f1)"
           jq -n \
             --arg schemaVersion "bootstrap.mindclade.dev/recovery-evidence/v1" \
-            --arg mode "connected-read-only" \
-            --arg result "passed" \
+            --arg mode "non-qualifying-control-observation" \
+            --arg result "observed-not-restored" \
             --arg sourceSha "${GITHUB_SHA}" \
             --arg controlSummarySha256 "${control_summary_digest}" \
             --arg restoreManifestSha256 "${restore_digest}" \
@@ -717,10 +838,10 @@ jobs:
             sha256sum control-summary.json evidence.json evidence.sig public-key.pem >SHA256SUMS
           )
 
-      - name: Retain only redacted signed evidence
+      - name: Retain only redacted signed observation evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: connected-recovery-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/connected-evidence/
+          name: non-qualifying-recovery-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/observation-evidence/
           if-no-files-found: error
           retention-days: 90

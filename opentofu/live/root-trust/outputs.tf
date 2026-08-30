@@ -28,6 +28,10 @@ output "federation" {
       audiences        = module.github_federation.audiences
       service_accounts = module.github_federation.service_accounts
     }
+    github_ci_evidence  = module.github_federation.ci_evidence
+    github_config       = module.github_federation.github_config
+    infrastructure_live = module.github_federation.infrastructure_live
+    activation          = var.bootstrap.github_activation
     buildkite = {
       provider        = module.buildkite_federation.provider_name
       audience        = module.buildkite_federation.audience

@@ -28,7 +28,7 @@ locals {
   reader_bindings = {
     for binding in setproduct(
       toset(keys(var.buckets)),
-      var.reader_principals,
+      setunion(var.reader_principals, [var.recovery_reader_principal]),
       ) : "${binding[0]}:${binding[1]}" => {
       bucket = binding[0]
       member = binding[1]

@@ -3,6 +3,13 @@ name: protected-apply
 "on":
   workflow_dispatch:
     inputs:
+      operation:
+        description: Create a reviewable plan or apply a separately approved plan run
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
       root:
         description: OpenTofu composition root to change
         required: true
@@ -13,6 +20,26 @@ name: protected-apply
       source_sha:
         description: Full protected-main commit SHA approved for application
         required: true
+        type: string
+      plan_run_id:
+        description: Successful plan-only workflow run ID; required only for apply
+        required: false
+        type: string
+      reviewed_plan_sha256:
+        description: Exact reviewed saved-plan SHA-256; required only for apply
+        required: false
+        type: string
+      approval_receipt_b64:
+        description: Canonical two-approver receipt JSON encoded as base64; required only for apply
+        required: false
+        type: string
+      approval_signature_1_b64:
+        description: First detached ECDSA P-256 signature encoded as base64; required only for apply
+        required: false
+        type: string
+      approval_signature_2_b64:
+        description: Second detached ECDSA P-256 signature encoded as base64; required only for apply
+        required: false
         type: string
 
 permissions:
@@ -31,9 +58,14 @@ env:
 jobs:
   plan:
     name: plan
-    runs-on: ubuntu-24.04
+    if: inputs.operation == 'plan'
+    runs-on:
+      group: mindclade-ring0-protected
+      labels:
+        - self-hosted
+        - mindclade-ring0-ephemeral
     timeout-minutes: 45
-    environment: infrastructure-plan
+    environment: trusted-build
     permissions:
       contents: read
       id-token: write
@@ -376,7 +408,7 @@ jobs:
       - name: Bind plan evidence and provenance
         shell: bash
         env:
-          ARTIFACT_NAME: bootstrap-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          ARTIFACT_NAME: bootstrap-plan
           TF_VAR_workforce_oidc_client_secret: ${{ inputs.root == 'root-trust' && secrets.WORKFORCE_OIDC_CLIENT_SECRET || '' }}
           TF_VAR_workforce_oidc_client_secret_version: ${{ inputs.root == 'root-trust' && vars.WORKFORCE_OIDC_CLIENT_SECRET_VERSION || '' }}
         run: |
@@ -444,16 +476,32 @@ jobs:
       - name: Upload the one-day immutable plan bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bootstrap-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          name: bootstrap-plan
           path: ${{ runner.temp }}/plan-bundle/
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
+      - name: Publish the exact review coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          saved_plan_sha256="$(jq -er '.savedPlanSha256' "${RUNNER_TEMP}/plan-bundle/provenance.json")"
+          {
+            printf "Plan run ID: \`%s\`\n\n" "${GITHUB_RUN_ID}"
+            printf "Source SHA: \`%s\`\n\n" "${GITHUB_SHA}"
+            printf "Root: \`%s\`\n\n" "${BOOTSTRAP_ROOT}"
+            printf "Saved-plan SHA-256: \`%s\`\n" "${saved_plan_sha256}"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
   apply:
     name: apply
-    needs: plan
-    runs-on: ubuntu-24.04
+    if: inputs.operation == 'apply'
+    runs-on:
+      group: mindclade-ring0-protected
+      labels:
+        - self-hosted
+        - mindclade-ring0-ephemeral
     timeout-minutes: 330
     environment: infrastructure-apply
     permissions:
@@ -468,6 +516,10 @@ jobs:
       WIF_PROVIDER: ${{ vars.GCP_APPLY_WORKLOAD_IDENTITY_PROVIDER }}
       WIF_SERVICE_ACCOUNT: ${{ vars.GCP_APPLY_SERVICE_ACCOUNT }}
       WIF_AUDIENCE: ${{ vars.GCP_APPLY_OIDC_AUDIENCE }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      REVIEWED_PLAN_SHA256: ${{ inputs.reviewed_plan_sha256 }}
+      APPROVER_PUBLIC_KEY_1_B64: ${{ vars.BOOTSTRAP_APPLY_APPROVER_PUBLIC_KEY_1_B64 }}
+      APPROVER_PUBLIC_KEY_2_B64: ${{ vars.BOOTSTRAP_APPLY_APPROVER_PUBLIC_KEY_2_B64 }}
     steps:
       - name: Check out the exact planned source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -515,18 +567,14 @@ jobs:
           test -n "${WIF_PROVIDER}"
           test -n "${WIF_SERVICE_ACCOUNT}"
           test -n "${WIF_AUDIENCE}"
-          case "${BOOTSTRAP_ROOT}" in
-            root-trust)
-              test -n "${TF_VAR_workforce_oidc_client_secret}"
-              test "${#TF_VAR_workforce_oidc_client_secret}" -ge 32
-              [[ "${TF_VAR_workforce_oidc_client_secret_version}" =~ ^[1-9][0-9]*$ ]]
-              ;;
-            recovery-plane)
-              ;;
-            *)
-              exit 1
-              ;;
-          esac
+          test "${BOOTSTRAP_ROOT}" = "root-trust"
+          test -n "${TF_VAR_workforce_oidc_client_secret}"
+          test "${#TF_VAR_workforce_oidc_client_secret}" -ge 32
+          [[ "${TF_VAR_workforce_oidc_client_secret_version}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${PLAN_RUN_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${REVIEWED_PLAN_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          test -n "${APPROVER_PUBLIC_KEY_1_B64}"
+          test -n "${APPROVER_PUBLIC_KEY_2_B64}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -543,11 +591,32 @@ jobs:
           checksums: |
             5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8
 
-      - name: Download this run's plan bundle
+      - name: Verify the referenced plan workflow run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_json="${RUNNER_TEMP}/plan-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" >"${run_json}"
+          jq -e \
+            --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
+            '(.event == "workflow_dispatch")
+              and (.head_sha == $sourceSha)
+              and (.head_branch == "main")
+              and (.status == "completed")
+              and (.conclusion == "success")
+              and (.path == ".github/workflows/protected-apply.yml")' \
+            "${run_json}" >/dev/null
+
+      - name: Download the separately reviewed plan bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bootstrap-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          name: bootstrap-plan
           path: ${{ runner.temp }}/plan-bundle
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.plan_run_id }}
 
       - name: Verify bundle integrity, provenance, and freshness
         shell: bash
@@ -589,9 +658,8 @@ jobs:
           jq -e \
             --arg root "${BOOTSTRAP_ROOT}" \
             --arg sourceSha "${EXPECTED_SOURCE_SHA}" \
-            --arg runId "${GITHUB_RUN_ID}" \
-            --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
-            --arg artifact "bootstrap-plan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --arg runId "${PLAN_RUN_ID}" \
+            --arg artifact "bootstrap-plan" \
             --arg backendConfigurationSha256 "${backend_configuration_sha256}" \
             --arg savedPlanSha256 "${saved_plan_sha256}" \
             --arg clientSecretBindingSha256 "${client_secret_binding_sha256}" \
@@ -600,7 +668,7 @@ jobs:
               and (.root == $root)
               and (.sourceSha == $sourceSha)
               and (.runId == $runId)
-              and (.runAttempt == $runAttempt)
+              and (.runAttempt | type == "string" and test("^[1-9][0-9]*$"))
               and (.artifact == $artifact)
               and (.backendConfigurationSha256 == $backendConfigurationSha256)
               and (.resolvedVariablesSha256 | type == "string" and test("^[0-9a-f]{64}$"))
@@ -608,6 +676,7 @@ jobs:
               and (.clientSecretBindingSha256 == $clientSecretBindingSha256)
               and (.clientSecretVersion == $clientSecretVersion)' \
             "${bundle}/provenance.json" >/dev/null
+          test "${saved_plan_sha256}" = "${REVIEWED_PLAN_SHA256}"
           created_epoch="$(jq -er '.createdEpoch | numbers' "${bundle}/provenance.json")"
           expires_epoch="$(jq -er '.expiresEpoch | numbers' "${bundle}/provenance.json")"
           now_epoch="$(date -u +%s)"
@@ -615,6 +684,43 @@ jobs:
           test "${now_epoch}" -ge "${created_epoch}"
           test "${now_epoch}" -le "${expires_epoch}"
           go -C tooling build -trimpath -o "${RUNNER_TEMP}/bootstrapctl" ./cmd/bootstrapctl
+
+      - name: Verify the expiry-bound two-person plan approval
+        shell: bash
+        env:
+          APPROVAL_RECEIPT_B64: ${{ inputs.approval_receipt_b64 }}
+          APPROVAL_SIGNATURE_1_B64: ${{ inputs.approval_signature_1_b64 }}
+          APPROVAL_SIGNATURE_2_B64: ${{ inputs.approval_signature_2_b64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          approval_dir="${RUNNER_TEMP}/approval"
+          mkdir -m 0700 "${approval_dir}"
+          for name in \
+            APPROVAL_RECEIPT_B64 APPROVAL_SIGNATURE_1_B64 APPROVAL_SIGNATURE_2_B64 \
+            APPROVER_PUBLIC_KEY_1_B64 APPROVER_PUBLIC_KEY_2_B64; do
+            test -n "${!name}"
+            [[ "${!name}" =~ ^[A-Za-z0-9+/=]+$ ]]
+          done
+          printf '%s' "${APPROVAL_RECEIPT_B64}" | base64 --decode >"${approval_dir}/receipt.json"
+          printf '%s' "${APPROVAL_SIGNATURE_1_B64}" | base64 --decode >"${approval_dir}/signature-1.bin"
+          printf '%s' "${APPROVAL_SIGNATURE_2_B64}" | base64 --decode >"${approval_dir}/signature-2.bin"
+          printf '%s' "${APPROVER_PUBLIC_KEY_1_B64}" | base64 --decode >"${approval_dir}/public-key-1.pem"
+          printf '%s' "${APPROVER_PUBLIC_KEY_2_B64}" | base64 --decode >"${approval_dir}/public-key-2.pem"
+          chmod 0600 "${approval_dir}"/*
+          "${RUNNER_TEMP}/bootstrapctl" approval verify \
+            --receipt "${approval_dir}/receipt.json" \
+            --public-key-1 "${approval_dir}/public-key-1.pem" \
+            --public-key-2 "${approval_dir}/public-key-2.pem" \
+            --signature-1 "${approval_dir}/signature-1.bin" \
+            --signature-2 "${approval_dir}/signature-2.bin" \
+            --operation apply \
+            --source-sha "${EXPECTED_SOURCE_SHA}" \
+            --root "${BOOTSTRAP_ROOT}" \
+            --subject-kind opentofu-saved-plan \
+            --subject-sha256 "${REVIEWED_PLAN_SHA256}" \
+            --plan-run-id "${PLAN_RUN_ID}" \
+            >"${approval_dir}/verification.json"
 
       - name: Authenticate the distinct apply identity with workload federation
         id: apply-auth

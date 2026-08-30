@@ -73,6 +73,7 @@ var (
 	keyIDPattern                   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}$`)
 	gcpIDPattern                   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 	githubRepoPattern              = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	commitSHAPattern               = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	uuidPattern                    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	providerNamePattern            = regexp.MustCompile(`^projects/([0-9]+)/locations/global/workloadIdentityPools/([a-z0-9-]+)/providers/([a-z0-9-]+)$`)
 	keyVersionPattern              = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/locations/([a-z0-9-]+)/keyRings/([A-Za-z0-9_-]+)/cryptoKeys/([A-Za-z0-9_-]+)/cryptoKeyVersions/([1-9][0-9]*)$`)
@@ -92,10 +93,9 @@ var outOfBandReferences = map[string]bool{
 	"RECOVERY_CONTACT_2": true,
 }
 
-// ExpectedFiles returns the closed blueprint source manifest, including BLUEPRINT.md.
+// ExpectedFiles returns the closed MC-ARCH-001 bootstrap source manifest.
 func ExpectedFiles() []string {
 	paths := append([]string{}, expectedFiles...)
-	paths = append(paths, "BLUEPRINT.md")
 	sort.Strings(paths)
 	return paths
 }
@@ -322,17 +322,20 @@ type componentDocument struct {
 		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Spec struct {
-		Type                string   `yaml:"type"`
-		Lifecycle           string   `yaml:"lifecycle"`
-		Maturity            string   `yaml:"maturity"`
-		Owner               string   `yaml:"owner"`
-		SecurityReviewers   []string `yaml:"security_reviewers"`
-		RepositoryClass     string   `yaml:"repository_class"`
-		DataClassification  string   `yaml:"data_classification"`
-		ProductionAuthority bool     `yaml:"production_authority"`
-		Dependencies        []string `yaml:"dependencies"`
-		Provides            []string `yaml:"provides"`
-		Release             struct {
+		Type                 string   `yaml:"type"`
+		Lifecycle            string   `yaml:"lifecycle"`
+		Maturity             string   `yaml:"maturity"`
+		Owner                string   `yaml:"owner"`
+		SecurityReviewers    []string `yaml:"security_reviewers"`
+		OperationalReviewers []string `yaml:"operational_reviewers"`
+		RepositoryClass      string   `yaml:"repository_class"`
+		DataClassification   string   `yaml:"data_classification"`
+		TrustTier            string   `yaml:"trust_tier"`
+		RecoveryTier         string   `yaml:"recovery_tier"`
+		ProductionAuthority  bool     `yaml:"production_authority"`
+		Dependencies         []string `yaml:"dependencies"`
+		Provides             []string `yaml:"provides"`
+		Release              struct {
 			Strategy  string   `yaml:"strategy"`
 			Artifact  string   `yaml:"artifact"`
 			Immutable bool     `yaml:"immutable"`
@@ -370,16 +373,21 @@ func validateComponent(root string) error {
 		return fmt.Errorf("validate component.yaml: invalid component identity")
 	}
 	if component.Metadata.Description == "" || component.Metadata.Annotations["github.com/project-slug"] != "mindclade/bootstrap" ||
-		component.Metadata.Annotations["mindclade.dev/authority-boundary"] != "ring-0-only" {
+		component.Metadata.Annotations["mindclade.dev/authority-boundary"] != "ring-0-only" ||
+		component.Metadata.Annotations["mindclade.dev/trust-tier"] != "ring-0" ||
+		component.Metadata.Annotations["mindclade.dev/recovery-tier"] != "isolated-ring-0" {
 		return fmt.Errorf("validate component.yaml: metadata contract is incomplete")
 	}
-	if component.Spec.Type != "bootstrap-control-plane" || component.Spec.Lifecycle != "production" || component.Spec.Maturity != "production" ||
-		component.Spec.Owner != "platform-operations" || component.Spec.RepositoryClass != "infrastructure-source" ||
-		component.Spec.DataClassification != "restricted" || !component.Spec.ProductionAuthority {
-		return fmt.Errorf("validate component.yaml: owner/maturity/authority contract is invalid")
+	if component.Spec.Type != "bootstrap-control-plane" || component.Spec.Lifecycle != "pre-production" || component.Spec.Maturity != "pre-production" ||
+		component.Spec.Owner != "security" || component.Spec.RepositoryClass != "infrastructure-source" ||
+		component.Spec.DataClassification != "restricted" || component.Spec.TrustTier != "ring-0" ||
+		component.Spec.RecoveryTier != "isolated-ring-0" || component.Spec.ProductionAuthority {
+		return fmt.Errorf("validate component.yaml: owner/readiness/authority contract is invalid")
 	}
-	if component.Spec.Dependencies == nil || len(component.Spec.Provides) < 3 || len(component.Spec.SecurityReviewers) < 1 ||
-		component.Spec.SecurityReviewers[0] == component.Spec.Owner {
+	if component.Spec.Dependencies == nil || len(component.Spec.Provides) < 3 ||
+		len(component.Spec.SecurityReviewers) < 1 || component.Spec.SecurityReviewers[0] != "security" ||
+		len(component.Spec.OperationalReviewers) < 1 || component.Spec.OperationalReviewers[0] != "platform-operations" ||
+		component.Spec.OperationalReviewers[0] == component.Spec.Owner {
 		return fmt.Errorf("validate component.yaml: dependency/ownership contract is invalid")
 	}
 	for _, dependency := range component.Spec.Dependencies {
@@ -457,6 +465,7 @@ func validateReferences(root string) error {
 type workflowContract struct {
 	triggers     []string
 	jobs         map[string]map[string]string
+	runners      map[string]any
 	environments map[string]string
 	actions      []string
 }
@@ -466,6 +475,9 @@ var workflowContracts = map[string]workflowContract{
 		triggers: []string{"merge_group", "pull_request", "push", "workflow_dispatch"},
 		jobs: map[string]map[string]string{
 			"required": nil,
+		},
+		runners: map[string]any{
+			"required": "ubuntu-24.04",
 		},
 		environments: map[string]string{},
 		actions: []string{
@@ -482,8 +494,18 @@ var workflowContracts = map[string]workflowContract{
 			"plan":  {"contents": "read", "id-token": "write"},
 			"apply": {"actions": "read", "contents": "read", "id-token": "write"},
 		},
+		runners: map[string]any{
+			"plan": map[string]any{
+				"group":  "mindclade-ring0-protected",
+				"labels": []any{"self-hosted", "mindclade-ring0-ephemeral"},
+			},
+			"apply": map[string]any{
+				"group":  "mindclade-ring0-protected",
+				"labels": []any{"self-hosted", "mindclade-ring0-ephemeral"},
+			},
+		},
 		environments: map[string]string{
-			"plan":  "infrastructure-plan",
+			"plan":  "trusted-build",
 			"apply": "infrastructure-apply",
 		},
 		actions: []string{
@@ -502,16 +524,24 @@ var workflowContracts = map[string]workflowContract{
 	".github/workflows/recovery-verification.yml": {
 		triggers: []string{"schedule", "workflow_dispatch"},
 		jobs: map[string]map[string]string{
-			"offline":   {"attestations": "write", "contents": "read", "id-token": "write"},
-			"connected": {"contents": "read", "id-token": "write"},
+			"offline":     {"attestations": "write", "contents": "read", "id-token": "write"},
+			"observation": {"contents": "read", "id-token": "write"},
+		},
+		runners: map[string]any{
+			"offline": "ubuntu-24.04",
+			"observation": map[string]any{
+				"group":  "mindclade-ring0-protected",
+				"labels": []any{"self-hosted", "mindclade-ring0-ephemeral"},
+			},
 		},
 		environments: map[string]string{
-			"connected": "recovery-verification",
+			"observation": "infrastructure-apply",
 		},
 		actions: []string{
 			"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
 			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+			"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
 			"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
 			"actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
 			"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
@@ -567,8 +597,8 @@ func validateWorkflowSecurity(root string) error {
 				problems = append(problems, fmt.Sprintf("%s job %s must be an object", relative, jobName))
 				continue
 			}
-			if job["runs-on"] != "ubuntu-24.04" {
-				problems = append(problems, fmt.Sprintf("%s job %s must use ubuntu-24.04", relative, jobName))
+			if !reflect.DeepEqual(job["runs-on"], contract.runners[jobName]) {
+				problems = append(problems, fmt.Sprintf("%s job %s must use the exact approved runner contract", relative, jobName))
 			}
 			actualPermissions, present := job["permissions"]
 			if expectedPermissions == nil {
@@ -681,24 +711,44 @@ func validateRecoveryWorkflowContract(root string) error {
 	}
 	dispatch, _ := triggers["workflow_dispatch"].(map[string]any)
 	inputs, _ := dispatch["inputs"].(map[string]any)
-	connectedInput, _ := inputs["connected"].(map[string]any)
-	validInput := len(dispatch) == 1 && len(inputs) == 1 && len(connectedInput) == 4 &&
-		connectedInput["description"] == "Also perform federated, read-only recovery-plane checks and KMS-sign the evidence" &&
-		connectedInput["required"] == false && connectedInput["default"] == false && connectedInput["type"] == "boolean"
+	validInput := len(dispatch) == 1 && reflect.DeepEqual(inputs, map[string]any{
+		"observe_controls": map[string]any{
+			"description": "Run a non-qualifying read-only control observation on the isolated runner",
+			"required":    false,
+			"default":     false,
+			"type":        "boolean",
+		},
+		"approval_receipt_b64": map[string]any{
+			"description": "Canonical two-approver observation receipt JSON encoded as base64",
+			"required":    false,
+			"type":        "string",
+		},
+		"approval_signature_1_b64": map[string]any{
+			"description": "First detached ECDSA P-256 signature encoded as base64",
+			"required":    false,
+			"type":        "string",
+		},
+		"approval_signature_2_b64": map[string]any{
+			"description": "Second detached ECDSA P-256 signature encoded as base64",
+			"required":    false,
+			"type":        "string",
+		},
+	})
 	if !validSchedule || !validInput {
-		problems = append(problems, "recovery workflow must use the exact quarterly schedule and manual connected boolean input")
+		problems = append(problems, "recovery workflow must use the exact quarterly schedule and manual non-qualifying observation inputs")
 	}
 
 	jobs, _ := workflow["jobs"].(map[string]any)
 	offline, _ := jobs["offline"].(map[string]any)
-	connected, _ := jobs["connected"].(map[string]any)
-	if offline["timeout-minutes"] != 45 || connected["timeout-minutes"] != 45 {
+	observation, _ := jobs["observation"].(map[string]any)
+	if offline["timeout-minutes"] != 45 || observation["timeout-minutes"] != 45 {
 		problems = append(problems, "recovery jobs must retain the exact 45-minute timeout")
 	}
-	if connected["if"] != "github.event_name == 'workflow_dispatch' && inputs.connected" || connected["needs"] != "offline" {
-		problems = append(problems, "connected recovery verification must remain manual-only and depend on offline qualification")
+	if observation["name"] != "non-qualifying-control-observation" ||
+		observation["if"] != "github.event_name == 'workflow_dispatch' && inputs.observe_controls" || observation["needs"] != "offline" {
+		problems = append(problems, "recovery control observation must remain explicitly non-qualifying, manual-only, and depend on offline qualification")
 	}
-	if !exactStringMap(connected["env"], map[string]string{
+	if !exactStringMap(observation["env"], map[string]string{
 		"ORGANIZATION_ID":                  "${{ vars.GCP_ORGANIZATION_ID }}",
 		"AUDIT_PROJECT_ID":                 "${{ vars.GCP_AUDIT_PROJECT_ID }}",
 		"RECOVERY_PROJECT_ID":              "${{ vars.GCP_RECOVERY_PROJECT_ID }}",
@@ -716,8 +766,10 @@ func validateRecoveryWorkflowContract(root string) error {
 		"WIF_PROVIDER":                     "${{ vars.GCP_RECOVERY_WORKLOAD_IDENTITY_PROVIDER }}",
 		"WIF_SERVICE_ACCOUNT":              "${{ vars.GCP_RECOVERY_SERVICE_ACCOUNT }}",
 		"WIF_AUDIENCE":                     "${{ vars.GCP_RECOVERY_OIDC_AUDIENCE }}",
+		"APPROVER_PUBLIC_KEY_1_B64":        "${{ vars.BOOTSTRAP_RECOVERY_APPROVER_PUBLIC_KEY_1_B64 }}",
+		"APPROVER_PUBLIC_KEY_2_B64":        "${{ vars.BOOTSTRAP_RECOVERY_APPROVER_PUBLIC_KEY_2_B64 }}",
 	}) {
-		problems = append(problems, "connected recovery environment must equal the exact non-secret qualified-output contract")
+		problems = append(problems, "recovery observation environment must equal the exact non-secret qualified-output and approval-key contract")
 	}
 
 	step := func(job map[string]any, name string) map[string]any {
@@ -739,7 +791,7 @@ func validateRecoveryWorkflowContract(root string) error {
 		inputs, ok := candidate["with"].(map[string]any)
 		return ok && reflect.DeepEqual(inputs, expected)
 	}
-	auth := step(connected, "Authenticate the isolated recovery identity")
+	auth := step(observation, "Authenticate the isolated recovery identity")
 	if auth == nil || !exactInputs(auth, map[string]any{
 		"project_id":                   "${{ env.RECOVERY_PROJECT_ID }}",
 		"workload_identity_provider":   "${{ env.WIF_PROVIDER }}",
@@ -750,7 +802,7 @@ func validateRecoveryWorkflowContract(root string) error {
 	}) {
 		problems = append(problems, "recovery federation must use the exact identity, audience, and credential-file inputs")
 	}
-	gcloud := step(connected, "Set up Google Cloud CLI")
+	gcloud := step(observation, "Set up Google Cloud CLI")
 	if gcloud == nil || !exactInputs(gcloud, map[string]any{"version": "504.0.0"}) {
 		problems = append(problems, "recovery workflow must pin the exact qualified gcloud version")
 	}
@@ -768,20 +820,22 @@ func validateRecoveryWorkflowContract(root string) error {
 	}) {
 		problems = append(problems, "offline artifact upload must retain only the exact redacted evidence file")
 	}
-	connectedUpload := step(connected, "Retain only redacted signed evidence")
-	if connectedUpload == nil || !exactInputs(connectedUpload, map[string]any{
-		"name":              "connected-recovery-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
-		"path":              "${{ runner.temp }}/connected-evidence/",
+	observationUpload := step(observation, "Retain only redacted signed observation evidence")
+	if observationUpload == nil || !exactInputs(observationUpload, map[string]any{
+		"name":              "non-qualifying-recovery-observation-${{ github.run_id }}-${{ github.run_attempt }}",
+		"path":              "${{ runner.temp }}/observation-evidence/",
 		"if-no-files-found": "error", "retention-days": 90,
 	}) {
-		problems = append(problems, "connected artifact upload must retain only the exact redacted signed bundle")
+		problems = append(problems, "observation artifact upload must retain only the exact explicitly non-qualifying redacted signed bundle")
 	}
 
-	sinkStep := step(connected, "Read backend and recovery generations without logging inventory")
+	sinkStep := step(observation, "Read backend and recovery generations without logging inventory")
 	sinkRun, _ := sinkStep["run"].(string)
 	requiredSinkSnippets := []string{
 		`'bootstrap-admin-activity|primary|log_id("cloudaudit.googleapis.com/activity")'`,
 		`'bootstrap-admin-activity-recovery|recovery|log_id("cloudaudit.googleapis.com/activity")'`,
+		`'bootstrap-data-access|primary|log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"'`,
+		`'bootstrap-data-access-recovery|recovery|log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"'`,
 		`'bootstrap-security-events|primary|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"'`,
 		`'bootstrap-security-events-recovery|recovery|severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"'`,
 		`--organization="${ORGANIZATION_ID}"`,
@@ -794,9 +848,72 @@ func validateRecoveryWorkflowContract(root string) error {
 	}
 	for _, snippet := range requiredSinkSnippets {
 		if !strings.Contains(sinkRun, snippet) {
-			problems = append(problems, "connected recovery must verify the four exact enabled, exclusion-free organization audit sinks")
+			problems = append(problems, "recovery observation must verify the six exact enabled, exclusion-free organization audit sinks")
 			break
 		}
+	}
+	for _, snippet := range []string{
+		`gcloud organizations get-iam-policy "${ORGANIZATION_ID}"`,
+		`select(.service == "storage.googleapis.com")`,
+		`["DATA_READ", "DATA_WRITE"]`,
+		`((.exemptedMembers // []) | length) == 0`,
+	} {
+		if !strings.Contains(sinkRun, snippet) {
+			problems = append(problems, "recovery observation must verify exact organization-wide Storage DATA_READ and DATA_WRITE audit configuration without exemptions")
+			break
+		}
+	}
+
+	approvalStep := step(observation, "Verify the expiry-bound two-person observation approval")
+	approvalRun, _ := approvalStep["run"].(string)
+	for _, snippet := range []string{
+		`--operation recovery-observation`,
+		`--source-sha "${GITHUB_SHA}"`,
+		`--root recovery-verification`,
+		`--subject-kind recovery-restore-manifest`,
+		`--subject-sha256 "${restore_manifest_sha256}"`,
+		`--plan-run-id none`,
+	} {
+		if !strings.Contains(approvalRun, snippet) {
+			problems = append(problems, "recovery federation must be preceded by an expiry-bound two-distinct-approver receipt bound to the exact source and restore manifest")
+			break
+		}
+	}
+	steps, _ := observation["steps"].([]any)
+	approvalIndex, authIndex := -1, -1
+	for index, raw := range steps {
+		candidate, _ := raw.(map[string]any)
+		switch candidate["name"] {
+		case "Verify the expiry-bound two-person observation approval":
+			approvalIndex = index
+		case "Authenticate the isolated recovery identity":
+			authIndex = index
+		}
+	}
+	if approvalIndex < 0 || authIndex != approvalIndex+1 {
+		problems = append(problems, "recovery approval verification must occur immediately before identity exchange")
+	}
+
+	deliveryStep := step(observation, "Require recent Storage Data Access delivery in both retained audit views")
+	deliveryRun, _ := deliveryStep["run"].(string)
+	for _, snippet := range []string{
+		`protoPayload.authenticationInfo.principalEmail=\"${WIF_SERVICE_ACCOUNT}\"`,
+		`--bucket="${bucket}"`,
+		`--view=_AllLogs`,
+		`primaryDeliveryObserved: true`,
+		`recoveryDeliveryObserved: true`,
+	} {
+		if !strings.Contains(deliveryRun, snippet) {
+			problems = append(problems, "recovery observation must require recent Storage Data Access delivery in both exact retained audit views")
+			break
+		}
+	}
+
+	evidenceStep := step(observation, "Render and KMS-sign redacted non-qualifying observation evidence")
+	evidenceRun, _ := evidenceStep["run"].(string)
+	if !strings.Contains(evidenceRun, `--arg mode "non-qualifying-control-observation"`) ||
+		!strings.Contains(evidenceRun, `--arg result "observed-not-restored"`) {
+		problems = append(problems, "recovery control observation must be cryptographically labeled non-qualifying and observed-not-restored")
 	}
 
 	sort.Strings(problems)
@@ -821,7 +938,7 @@ func validateTerminalSourceRechecks(root string) error {
 			sha: `test "$(git rev-parse HEAD)" = "${EXPECTED_SOURCE_SHA}"`, mutation: `tofu -chdir="opentofu/live/${BOOTSTRAP_ROOT}" apply`,
 		},
 		{
-			path: ".github/workflows/recovery-verification.yml", job: "connected", step: "Render and KMS-sign redacted connected evidence",
+			path: ".github/workflows/recovery-verification.yml", job: "observation", step: "Render and KMS-sign redacted non-qualifying observation evidence",
 			sha: `test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"`, tracked: "git diff --exit-code -- .",
 			untracked: `test -z "$(git status --porcelain=v1 --untracked-files=all)"`, mutation: "gcloud kms asymmetric-sign",
 		},
@@ -1136,11 +1253,10 @@ func checkValue(value any, path string, problems *[]string) {
 }
 
 func validateTree(root string) error {
-	expected := make(map[string]bool, len(expectedFiles)+1)
+	expected := make(map[string]bool, len(expectedFiles))
 	for _, path := range expectedFiles {
 		expected[path] = true
 	}
-	expected["BLUEPRINT.md"] = true
 	actual := map[string]bool{}
 	var symlinks []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -1200,15 +1316,25 @@ func validateTrackedPaths(root string) error {
 	if err != nil {
 		return fmt.Errorf("enumerate tracked source: %w", err)
 	}
-	allowed := make(map[string]bool, len(expectedFiles)+1)
+	allowed := make(map[string]bool, len(expectedFiles))
 	for _, path := range expectedFiles {
 		allowed[path] = true
 	}
-	allowed["BLUEPRINT.md"] = true
 	var unexpected []string
 	for _, path := range strings.Split(string(output), "\x00") {
-		if path != "" && !allowed[filepath.ToSlash(path)] {
-			unexpected = append(unexpected, filepath.ToSlash(path))
+		if path == "" {
+			continue
+		}
+		normalized := filepath.ToSlash(path)
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(normalized))); errors.Is(err, os.ErrNotExist) {
+			// A staged deletion is absent from the candidate tree and is already
+			// covered by validateTree. Do not treat its stale index entry as source.
+			continue
+		} else if err != nil {
+			return fmt.Errorf("inspect tracked source %s: %w", normalized, err)
+		}
+		if !allowed[normalized] {
+			unexpected = append(unexpected, normalized)
 		}
 	}
 	sort.Strings(unexpected)
@@ -1594,7 +1720,33 @@ func (c *compiler) validateContracts() {
 	c.expect(federation, "assertion.sub", "spec", "workforce", "attributeMapping", "subject")
 	c.expect(federation, "assertion.name", "spec", "workforce", "attributeMapping", "displayName")
 	c.expect(federation, "assertion.groups", "spec", "workforce", "attributeMapping", "groups")
-	c.expectKeys(federation, []string{"github", "buildkite", "gitops"}, "spec", "workloadIdentityProviders")
+	c.expectKeys(federation, []string{"github", "github-config", "github-infrastructure", "github-ci-evidence", "buildkite", "gitops"}, "spec", "workloadIdentityProviders")
+	c.expect(federation, "blocked", "spec", "activation", "state")
+	c.expectStrings(federation, []string{
+		"bootstrap-protected-plan",
+		"bootstrap-protected-apply",
+		"bootstrap-recovery-verification",
+		"infrastructure-live-development-plan",
+		"infrastructure-live-development-apply",
+		"infrastructure-live-staging-plan",
+		"infrastructure-live-staging-apply",
+		"infrastructure-live-production-plan",
+		"infrastructure-live-production-apply",
+		"infrastructure-live-restricted-plan",
+		"infrastructure-live-restricted-apply",
+	}, "spec", "activation", "activeSubjectIds")
+	c.expectStrings(federation, []string{
+		"github-config-drift-plan",
+		"github-config-protected-plan",
+		"github-config-protected-apply",
+		"infrastructure-drift-plan",
+		"infrastructure-ci-evidence-verifier",
+	}, "spec", "activation", "gatedSubjectIds")
+	c.expectStrings(federation, []string{
+		"github-config-control-plane-federation-not-connected-qualified",
+		"infrastructure-drift-federation-not-connected-qualified",
+		"ci-evidence-federation-not-connected-qualified",
+	}, "spec", "activation", "blockers")
 
 	githubBase := []string{"spec", "workloadIdentityProviders", "github"}
 	c.validateProviderContract(federation, githubBase, "github", "identity-root", map[string]string{
@@ -1603,11 +1755,11 @@ func (c *compiler) validateContracts() {
 		"recovery": "recovery-root",
 	})
 	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(githubBase, "issuerUri")...)
-	c.expectEnvName(federation, "GITHUB_OIDC_AUDIENCE", append(githubBase, "allowedAudience")...)
-	c.expectEnvName(federation, "GITHUB_REPOSITORY_OWNER_ID", append(githubBase, "requiredClaims", "repository_owner_id")...)
-	c.expectEnvName(federation, "GITHUB_REPOSITORY_ID", append(githubBase, "requiredClaims", "repository_id")...)
+	c.expect(federation, "sts.googleapis.com", append(githubBase, "allowedAudience", "literal")...)
+	c.expect(federation, "316676129", append(githubBase, "requiredClaims", "repository_owner_id", "literal")...)
+	c.expect(federation, "1350991612", append(githubBase, "requiredClaims", "repository_id", "literal")...)
 	c.expect(federation, "refs/heads/main", append(githubBase, "requiredClaims", "ref", "literal")...)
-	c.expectEnvName(federation, "GITHUB_APPLY_WORKFLOW_REF", append(githubBase, "requiredClaims", "workflow_ref")...)
+	c.expect(federation, "mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main", append(githubBase, "requiredClaims", "workflow_ref", "literal")...)
 	c.expectKeys(federation, []string{"plan", "apply", "recovery"}, append(githubBase, "serviceAccounts")...)
 	c.expect(federation, "bootstrap-plan", append(githubBase, "serviceAccounts", "plan", "accountId")...)
 	c.expectStrings(federation, []string{
@@ -1630,30 +1782,148 @@ func (c *compiler) validateContracts() {
 	}, append(githubBase, "serviceAccounts", "plan", "roles")...)
 	c.expect(federation, "bootstrap-apply", append(githubBase, "serviceAccounts", "apply", "accountId")...)
 	c.expectStrings(federation, []string{
-		"custom/bootstrapOrganizationIamApply",
 		"roles/cloudkms.admin",
-		"roles/iam.organizationRoleAdmin",
-		"roles/iam.roleAdmin",
-		"roles/iam.serviceAccountAdmin",
-		"roles/iam.serviceAccountUser",
-		"roles/iam.workforcePoolAdmin",
+		"roles/iam.workloadIdentityPoolAdmin",
 		"roles/logging.configWriter",
 		"roles/privilegedaccessmanager.admin",
 		"roles/resourcemanager.projectIamAdmin",
 		"roles/serviceusage.serviceUsageAdmin",
-		"roles/storage.admin",
 		"roles/storage.objectAdmin",
-		"roles/storage.objectCreator",
-		"roles/storagetransfer.user",
 	}, append(githubBase, "serviceAccounts", "apply", "roles")...)
 	c.expect(federation, "bootstrap-recovery", append(githubBase, "serviceAccounts", "recovery", "accountId")...)
 	c.expectStrings(federation, []string{
 		"custom/bootstrapRecoverySigningMetadata",
 		"custom/bootstrapRecoverySinkRead",
 		"roles/cloudkms.signerVerifier",
+		"roles/logging.viewAccessor",
 		"roles/storage.legacyBucketReader",
 		"roles/storage.objectViewer",
 	}, append(githubBase, "serviceAccounts", "recovery", "roles")...)
+
+	githubConfigBase := []string{"spec", "workloadIdentityProviders", "github-config"}
+	c.expect(federation, "github", append(githubConfigBase, "platform")...)
+	c.expect(federation, "identity-root", append(githubConfigBase, "projectRef")...)
+	c.expect(federation, false, append(githubConfigBase, "activationEnabled")...)
+	c.expect(federation, "github-config", append(githubConfigBase, "poolId")...)
+	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(githubConfigBase, "issuerUri")...)
+	c.expect(federation, "assertion.sub", append(githubConfigBase, "subjectClaim")...)
+	c.expect(federation, "316676129", append(githubConfigBase, "repositoryOwnerId", "literal")...)
+	c.expect(federation, "1350986053", append(githubConfigBase, "repositoryId", "literal")...)
+	c.expect(federation, "mindclade@316676129/github-config@1350986053", append(githubConfigBase, "immutableRepository", "literal")...)
+	c.expect(federation, "mindclade/github-config", append(githubConfigBase, "repositoryFullName", "literal")...)
+	c.expect(federation, "refs/heads/main", append(githubConfigBase, "branchRef", "literal")...)
+	c.expectKeys(federation, []string{"apply", "plan"}, append(githubConfigBase, "identities")...)
+	githubConfigSubjects := map[string][]map[string]string{
+		"plan": {
+			{"id": "github-config-drift-plan", "workflowRef": "mindclade/github-config/.github/workflows/drift-detection.yml@refs/heads/main", "contextType": "ref", "contextValue": "refs/heads/main", "audience": "sts.googleapis.com"},
+			{"id": "github-config-protected-plan", "workflowRef": "mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "contextType": "environment", "contextValue": "trusted-build", "audience": "sts.googleapis.com"},
+		},
+		"apply": {
+			{"id": "github-config-protected-apply", "workflowRef": "mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "contextType": "environment", "contextValue": "infrastructure-apply", "audience": "sts.googleapis.com"},
+		},
+	}
+	for _, identity := range []string{"plan", "apply"} {
+		identityBase := append(append([]string{}, githubConfigBase...), "identities", identity)
+		c.expect(federation, "github-config-"+identity, append(identityBase, "providerId")...)
+		c.expect(federation, "github-config-"+identity, append(identityBase, "serviceAccountId")...)
+		subjects, _ := c.lookup(federation, append(identityBase, "subjects")...).([]any)
+		if len(subjects) != len(githubConfigSubjects[identity]) {
+			c.problem("%s.%s.subjects must contain exactly the canonical %s subjects", federation, strings.Join(identityBase, "."), identity)
+			continue
+		}
+		for index, expected := range githubConfigSubjects[identity] {
+			actual, ok := subjects[index].(map[string]any)
+			if !ok || len(actual) != len(expected) {
+				c.problem("%s.%s.subjects[%d] must be the exact canonical subject object", federation, strings.Join(identityBase, "."), index)
+				continue
+			}
+			for field, value := range expected {
+				if actual[field] != value {
+					c.problem("%s.%s.subjects[%d].%s must equal %s", federation, strings.Join(identityBase, "."), index, field, value)
+				}
+			}
+		}
+	}
+
+	infrastructureBase := []string{"spec", "workloadIdentityProviders", "github-infrastructure"}
+	c.expect(federation, "github", append(infrastructureBase, "platform")...)
+	c.expect(federation, "identity-root", append(infrastructureBase, "projectRef")...)
+	c.expect(federation, "infrastructure-live", append(infrastructureBase, "poolId")...)
+	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(infrastructureBase, "issuerUri")...)
+	c.expect(federation, "assertion.sub", append(infrastructureBase, "subjectClaim")...)
+	c.expect(federation, "316676129", append(infrastructureBase, "repositoryOwnerId", "literal")...)
+	c.expect(federation, "1350992171", append(infrastructureBase, "repositoryId", "literal")...)
+	c.expect(federation, "mindclade@316676129/infrastructure-live@1350992171", append(infrastructureBase, "immutableRepository", "literal")...)
+	c.expect(federation, "mindclade/infrastructure-live", append(infrastructureBase, "repositoryFullName", "literal")...)
+	c.expect(federation, "refs/heads/main", append(infrastructureBase, "branchRef", "literal")...)
+	c.expect(federation, "mindclade/infrastructure-live/.github/workflows/protected-apply.yml@refs/heads/main", append(infrastructureBase, "workflowRef", "literal")...)
+	infrastructureDriftBase := append(append([]string{}, infrastructureBase...), "drift")
+	c.expect(federation, false, append(infrastructureDriftBase, "activationEnabled")...)
+	c.expect(federation, "infrastructure-drift-plan", append(infrastructureDriftBase, "subjectId")...)
+	c.expect(federation, "infrastructure-plan", append(infrastructureDriftBase, "providerId")...)
+	c.expect(federation, "infrastructure-plan", append(infrastructureDriftBase, "serviceAccountId")...)
+	c.expect(federation, "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main", append(infrastructureDriftBase, "workflowRef")...)
+	c.expect(federation, "trusted-build", append(infrastructureDriftBase, "environment")...)
+	c.expect(federation, "sts.googleapis.com", append(infrastructureDriftBase, "allowedAudience")...)
+	infrastructureIdentities := []string{
+		"development-apply", "development-plan", "production-apply", "production-plan",
+		"restricted-apply", "restricted-plan", "staging-apply", "staging-plan",
+	}
+	c.expectKeys(federation, infrastructureIdentities, append(infrastructureBase, "identities")...)
+	for _, identity := range infrastructureIdentities {
+		parts := strings.Split(identity, "-")
+		environment, role := parts[0], parts[1]
+		executionEnvironment := "trusted-build"
+		if role == "apply" {
+			executionEnvironment = "infrastructure-apply"
+		}
+		identityBase := append(append([]string{}, infrastructureBase...), "identities", identity)
+		c.expect(federation, identity, append(identityBase, "providerId")...)
+		c.expect(federation, executionEnvironment, append(identityBase, "environment")...)
+		c.expect(federation, "https://github.mindclade.io/oidc/infrastructure-live/"+environment+"/"+role, append(identityBase, "allowedAudience", "literal")...)
+		c.expect(federation, "identity-root", append(identityBase, "serviceAccount", "projectRef")...)
+		c.expect(federation, identity, append(identityBase, "serviceAccount", "accountId")...)
+		c.expectStrings(federation, []string{}, append(identityBase, "serviceAccount", "roles")...)
+	}
+
+	ciEvidenceBase := []string{"spec", "workloadIdentityProviders", "github-ci-evidence"}
+	c.expect(federation, "github", append(ciEvidenceBase, "platform")...)
+	c.expect(federation, "identity-root", append(ciEvidenceBase, "projectRef")...)
+	c.expect(federation, false, append(ciEvidenceBase, "activationEnabled")...)
+	c.expect(federation, "github-ci-evidence", append(ciEvidenceBase, "poolId")...)
+	c.expectEnvName(federation, "GITHUB_OIDC_ISSUER_URI", append(ciEvidenceBase, "issuerUri")...)
+	c.expect(federation, "assertion.sub", append(ciEvidenceBase, "subjectClaim")...)
+	c.expect(federation, "316676129", append(ciEvidenceBase, "repositoryOwnerId", "literal")...)
+	ciEvidenceRepositoryIDs := map[string]string{
+		"bootstrap":           "1350991612",
+		"dot-github":          "1350980188",
+		"github-config":       "1350986053",
+		"gitops":              "1350991963",
+		"infrastructure-live": "1350992171",
+		"mindclade":           "1350990078",
+	}
+	c.expectKeys(federation, sortedKeys(ciEvidenceRepositoryIDs), append(ciEvidenceBase, "repositoryIds")...)
+	for repository, repositoryID := range ciEvidenceRepositoryIDs {
+		c.expect(federation, repositoryID, append(ciEvidenceBase, "repositoryIds", repository, "literal")...)
+	}
+	c.expect(federation, "writer", append(ciEvidenceBase, "writer", "providerId")...)
+	c.expectEnvName(federation, "GITHUB_CI_EVIDENCE_JOB_WORKFLOW_REF", append(ciEvidenceBase, "writer", "jobWorkflowRef")...)
+	c.expectStrings(federation, []string{"push", "release"}, append(ciEvidenceBase, "writer", "allowedEvents")...)
+	c.expect(federation, "refs/heads/main", append(ciEvidenceBase, "writer", "branchRef")...)
+	c.expect(federation, "refs/tags/v", append(ciEvidenceBase, "writer", "releaseTagPrefix")...)
+	c.expect(federation, "identity-root", append(ciEvidenceBase, "writer", "serviceAccount", "projectRef")...)
+	c.expect(federation, "ci-evidence-writer", append(ciEvidenceBase, "writer", "serviceAccount", "accountId")...)
+	c.expectStrings(federation, []string{}, append(ciEvidenceBase, "writer", "serviceAccount", "roles")...)
+	c.expect(federation, "verifier", append(ciEvidenceBase, "verifier", "providerId")...)
+	c.expect(federation, "1350992171", append(ciEvidenceBase, "verifier", "repositoryId", "literal")...)
+	c.expect(federation, "mindclade/infrastructure-live/.github/workflows/disaster-recovery.yml@refs/heads/main", append(ciEvidenceBase, "verifier", "workflowRef", "literal")...)
+	c.expectEnvName(federation, "INFRASTRUCTURE_LIVE_DISASTER_RECOVERY_WORKFLOW_SHA", append(ciEvidenceBase, "verifier", "workflowSha")...)
+	c.expectStrings(federation, []string{"workflow_dispatch"}, append(ciEvidenceBase, "verifier", "allowedEvents")...)
+	c.expect(federation, "refs/heads/main", append(ciEvidenceBase, "verifier", "ref", "literal")...)
+	c.expect(federation, "infrastructure-apply", append(ciEvidenceBase, "verifier", "environment")...)
+	c.expect(federation, "identity-root", append(ciEvidenceBase, "verifier", "serviceAccount", "projectRef")...)
+	c.expect(federation, "ci-evidence-verifier", append(ciEvidenceBase, "verifier", "serviceAccount", "accountId")...)
+	c.expectStrings(federation, []string{}, append(ciEvidenceBase, "verifier", "serviceAccount", "roles")...)
 
 	buildkiteBase := []string{"spec", "workloadIdentityProviders", "buildkite"}
 	c.validateProviderContract(federation, buildkiteBase, "buildkite", "identity-root", map[string]string{"bootstrap": "state-root"})
@@ -1682,7 +1952,7 @@ func (c *compiler) validateContracts() {
 	c.expect(signing, "signing-root", "spec", "projectRef")
 	c.expect(signing, "us-central1", "spec", "location")
 	c.expect(signing, "bootstrap-signing", "spec", "keyRing")
-	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence"}, "spec", "keys")
+	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence", "github-config-plan-evidence", "infrastructure-export"}, "spec", "keys")
 	administratorRefs := c.lookup(signing, "spec", "administrators")
 	if items, ok := administratorRefs.([]any); !ok || len(items) != 2 {
 		c.problem("%s.spec.administrators must contain exactly two references", signing)
@@ -1691,10 +1961,17 @@ func (c *compiler) validateContracts() {
 	for index, expected := range expectedAdministrators {
 		c.expectListEnvName(signing, expected, index, "spec", "administrators")
 	}
-	signerContracts := map[string]string{
-		"bootstrap-handoff": "BOOTSTRAP_HANDOFF_SIGNER",
-		"audit-anchor":      "AUDIT_ANCHOR_SIGNER",
-		"recovery-evidence": "RECOVERY_EVIDENCE_SIGNER",
+	signerContracts := map[string][]string{
+		"bootstrap-handoff":           {"BOOTSTRAP_HANDOFF_SIGNER"},
+		"audit-anchor":                {"AUDIT_ANCHOR_SIGNER"},
+		"recovery-evidence":           {"RECOVERY_EVIDENCE_SIGNER"},
+		"github-config-plan-evidence": {"GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER"},
+		"infrastructure-export": {
+			"INFRASTRUCTURE_DEVELOPMENT_EXPORT_SIGNER",
+			"INFRASTRUCTURE_STAGING_EXPORT_SIGNER",
+			"INFRASTRUCTURE_PRODUCTION_EXPORT_SIGNER",
+			"INFRASTRUCTURE_RESTRICTED_EXPORT_SIGNER",
+		},
 	}
 	for _, name := range sortedKeys(signerContracts) {
 		base := []string{"spec", "keys", name}
@@ -1707,10 +1984,12 @@ func (c *compiler) validateContracts() {
 			c.problem("%s.%s.activeVersionRef must identify a declared version", signing, strings.Join(base, "."))
 		}
 		c.expect(signing, true, append(base, "deletionProtection")...)
-		if items, ok := c.lookup(signing, append(base, "signers")...).([]any); !ok || len(items) != 1 {
-			c.problem("%s.%s.signers must contain exactly one reference", signing, strings.Join(base, "."))
+		if items, ok := c.lookup(signing, append(base, "signers")...).([]any); !ok || len(items) != len(signerContracts[name]) {
+			c.problem("%s.%s.signers must contain exactly %d references", signing, strings.Join(base, "."), len(signerContracts[name]))
 		}
-		c.expectListEnvName(signing, signerContracts[name], 0, append(base, "signers")...)
+		for index, signer := range signerContracts[name] {
+			c.expectListEnvName(signing, signer, index, append(base, "signers")...)
+		}
 	}
 
 	c.expectEnvName(audit, "GCP_ORGANIZATION_ID", "spec", "organization")
@@ -1750,6 +2029,8 @@ func (c *compiler) validateContracts() {
 	}{
 		"admin-activity":           {"bootstrap-admin-activity", "primary", `log_id("cloudaudit.googleapis.com/activity")`},
 		"admin-activity-recovery":  {"bootstrap-admin-activity-recovery", "recovery", `log_id("cloudaudit.googleapis.com/activity")`},
+		"data-access":              {"bootstrap-data-access", "primary", `log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"`},
+		"data-access-recovery":     {"bootstrap-data-access-recovery", "recovery", `log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"`},
 		"security-events":          {"bootstrap-security-events", "primary", `severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"`},
 		"security-events-recovery": {"bootstrap-security-events-recovery", "recovery", `severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"`},
 	}
@@ -1961,8 +2242,8 @@ func (c *compiler) rootTrustVariables() map[string]any {
 	githubBase := []string{"spec", "workloadIdentityProviders", "github"}
 	githubPoolBase := c.stringAt(federation, append(githubBase, "poolId")...)
 	githubProviderBase := c.stringAt(federation, append(githubBase, "providerId")...)
-	githubAudienceBase := c.resolvedAt(federation, append(githubBase, "allowedAudience")...)
-	githubApplyRef := c.resolvedAt(federation, append(githubBase, "requiredClaims", "workflow_ref")...)
+	githubAudienceBase := c.stringAt(federation, append(githubBase, "allowedAudience", "literal")...)
+	githubApplyRef := c.stringAt(federation, append(githubBase, "requiredClaims", "workflow_ref", "literal")...)
 	const applyWorkflowSuffix = "/.github/workflows/protected-apply.yml@refs/heads/main"
 	repositoryFullName := strings.TrimSuffix(githubApplyRef, applyWorkflowSuffix)
 	if repositoryFullName == githubApplyRef || !githubRepoPattern.MatchString(repositoryFullName) || githubApplyRef != repositoryFullName+applyWorkflowSuffix {
@@ -1984,7 +2265,7 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		c.requirePattern("GitHub "+role+" provider ID", providerID, gcpIDPattern)
 		githubPools[role] = poolID
 		githubProviders[role] = providerID
-		githubAudiences[role] = suffix(githubAudienceBase, role)
+		githubAudiences[role] = githubAudienceBase
 		githubWorkflowRefs[role] = githubApplyRef
 	}
 	githubServiceAccounts["plan"] = c.stringAt(federation, append(githubBase, "serviceAccounts", "plan", "accountId")...)
@@ -1994,13 +2275,15 @@ func (c *compiler) rootTrustVariables() map[string]any {
 	c.requireDistinct("GitHub pool IDs", stringMapValues(githubPools))
 	c.requireDistinct("GitHub provider IDs", stringMapValues(githubProviders))
 	c.requireDistinct("GitHub service-account IDs", stringMapValues(githubServiceAccounts))
-	c.requireDistinct("GitHub audiences", stringMapValues(githubAudiences))
+	if githubAudienceBase != "sts.googleapis.com" {
+		c.problem("bootstrap GitHub audiences must equal the exact organization-approved sts.googleapis.com value")
+	}
 	githubIssuer := c.resolvedAt(federation, append(githubBase, "issuerUri")...)
 	if githubIssuer != "https://token.actions.githubusercontent.com" {
 		c.problem("GitHub issuer must equal the canonical token.actions.githubusercontent.com endpoint")
 	}
-	repositoryID := c.resolvedAt(federation, append(githubBase, "requiredClaims", "repository_id")...)
-	repositoryOwnerID := c.resolvedAt(federation, append(githubBase, "requiredClaims", "repository_owner_id")...)
+	repositoryID := c.stringAt(federation, append(githubBase, "requiredClaims", "repository_id", "literal")...)
+	repositoryOwnerID := c.stringAt(federation, append(githubBase, "requiredClaims", "repository_owner_id", "literal")...)
 	if !regexp.MustCompile(`^[0-9]+$`).MatchString(repositoryID) || !regexp.MustCompile(`^[0-9]+$`).MatchString(repositoryOwnerID) {
 		c.problem("GitHub immutable repository and owner IDs must be decimal numbers")
 	}
@@ -2015,6 +2298,117 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		"service_account_ids":  githubServiceAccounts,
 		"audiences":            githubAudiences,
 		"workflow_refs":        githubWorkflowRefs,
+	}
+
+	githubConfigBase := []string{"spec", "workloadIdentityProviders", "github-config"}
+	githubConfigIdentities := map[string]any{}
+	for _, identity := range []string{"plan", "apply"} {
+		identityBase := append(append([]string{}, githubConfigBase...), "identities", identity)
+		rawSubjects, _ := c.lookup(federation, append(identityBase, "subjects")...).([]any)
+		subjects := make([]any, 0, len(rawSubjects))
+		for _, rawSubject := range rawSubjects {
+			subject, _ := rawSubject.(map[string]any)
+			id, _ := subject["id"].(string)
+			workflowRef, _ := subject["workflowRef"].(string)
+			contextType, _ := subject["contextType"].(string)
+			contextValue, _ := subject["contextValue"].(string)
+			audience, _ := subject["audience"].(string)
+			subjects = append(subjects, map[string]any{
+				"id":            id,
+				"workflow_ref":  workflowRef,
+				"context_type":  contextType,
+				"context_value": contextValue,
+				"audience":      audience,
+			})
+		}
+		githubConfigIdentities[identity] = map[string]any{
+			"provider_id":        c.stringAt(federation, append(identityBase, "providerId")...),
+			"service_account_id": c.stringAt(federation, append(identityBase, "serviceAccountId")...),
+			"subjects":           subjects,
+		}
+	}
+	githubConfig := map[string]any{
+		"activation_enabled":   c.boolAt(federation, append(githubConfigBase, "activationEnabled")...),
+		"pool_id":              c.stringAt(federation, append(githubConfigBase, "poolId")...),
+		"issuer_uri":           c.resolvedAt(federation, append(githubConfigBase, "issuerUri")...),
+		"repository_owner_id":  c.stringAt(federation, append(githubConfigBase, "repositoryOwnerId", "literal")...),
+		"repository_id":        c.stringAt(federation, append(githubConfigBase, "repositoryId", "literal")...),
+		"immutable_repository": c.stringAt(federation, append(githubConfigBase, "immutableRepository", "literal")...),
+		"repository_full_name": c.stringAt(federation, append(githubConfigBase, "repositoryFullName", "literal")...),
+		"branch_ref":           c.stringAt(federation, append(githubConfigBase, "branchRef", "literal")...),
+		"identities":           githubConfigIdentities,
+	}
+
+	infrastructureBase := []string{"spec", "workloadIdentityProviders", "github-infrastructure"}
+	infrastructureIdentities := map[string]any{}
+	for _, identity := range sortedKeys(c.objectAt(federation, append(infrastructureBase, "identities")...)) {
+		identityBase := append(append([]string{}, infrastructureBase...), "identities", identity)
+		infrastructureIdentities[identity] = map[string]any{
+			"provider_id":        c.stringAt(federation, append(identityBase, "providerId")...),
+			"service_account_id": c.stringAt(federation, append(identityBase, "serviceAccount", "accountId")...),
+			"environment":        c.stringAt(federation, append(identityBase, "environment")...),
+			"audience":           c.stringAt(federation, append(identityBase, "allowedAudience", "literal")...),
+		}
+	}
+	githubInfrastructure := map[string]any{
+		"pool_id":              c.stringAt(federation, append(infrastructureBase, "poolId")...),
+		"issuer_uri":           c.resolvedAt(federation, append(infrastructureBase, "issuerUri")...),
+		"repository_owner_id":  c.stringAt(federation, append(infrastructureBase, "repositoryOwnerId", "literal")...),
+		"repository_id":        c.stringAt(federation, append(infrastructureBase, "repositoryId", "literal")...),
+		"immutable_repository": c.stringAt(federation, append(infrastructureBase, "immutableRepository", "literal")...),
+		"repository_full_name": c.stringAt(federation, append(infrastructureBase, "repositoryFullName", "literal")...),
+		"branch_ref":           c.stringAt(federation, append(infrastructureBase, "branchRef", "literal")...),
+		"workflow_ref":         c.stringAt(federation, append(infrastructureBase, "workflowRef", "literal")...),
+		"drift": map[string]any{
+			"activation_enabled": c.boolAt(federation, append(infrastructureBase, "drift", "activationEnabled")...),
+			"subject_id":         c.stringAt(federation, append(infrastructureBase, "drift", "subjectId")...),
+			"provider_id":        c.stringAt(federation, append(infrastructureBase, "drift", "providerId")...),
+			"service_account_id": c.stringAt(federation, append(infrastructureBase, "drift", "serviceAccountId")...),
+			"workflow_ref":       c.stringAt(federation, append(infrastructureBase, "drift", "workflowRef")...),
+			"environment":        c.stringAt(federation, append(infrastructureBase, "drift", "environment")...),
+			"audience":           c.stringAt(federation, append(infrastructureBase, "drift", "allowedAudience")...),
+		},
+		"identities": infrastructureIdentities,
+	}
+	githubActivation := map[string]any{
+		"state":              c.stringAt(federation, "spec", "activation", "state"),
+		"active_subject_ids": c.stringsAt(federation, "spec", "activation", "activeSubjectIds"),
+		"gated_subject_ids":  c.stringsAt(federation, "spec", "activation", "gatedSubjectIds"),
+		"blockers":           c.stringsAt(federation, "spec", "activation", "blockers"),
+	}
+
+	ciEvidenceBase := []string{"spec", "workloadIdentityProviders", "github-ci-evidence"}
+	ciEvidenceRepositoryIDs := map[string]any{}
+	for repository := range c.objectAt(federation, append(ciEvidenceBase, "repositoryIds")...) {
+		ciEvidenceRepositoryIDs[repository] = c.stringAt(federation, append(ciEvidenceBase, "repositoryIds", repository, "literal")...)
+	}
+	ciEvidenceWriterWorkflowRef := c.resolvedAt(federation, append(ciEvidenceBase, "writer", "jobWorkflowRef")...)
+	ciEvidenceWriterWorkflowPattern := regexp.MustCompile(`^mindclade/\.github/\.github/workflows/reusable-required-check\.yml@([0-9a-f]{40})$`)
+	if !ciEvidenceWriterWorkflowPattern.MatchString(ciEvidenceWriterWorkflowRef) {
+		c.problem("CI evidence writer job_workflow_ref must bind reusable-required-check.yml at one full lowercase commit SHA")
+	}
+	ciEvidenceVerifierWorkflowSHA := c.resolvedAt(federation, append(ciEvidenceBase, "verifier", "workflowSha")...)
+	if !commitSHAPattern.MatchString(ciEvidenceVerifierWorkflowSHA) {
+		c.problem("CI evidence verifier workflow SHA must be one full lowercase commit SHA")
+	}
+	githubCiEvidence := map[string]any{
+		"activation_enabled":  c.boolAt(federation, append(ciEvidenceBase, "activationEnabled")...),
+		"pool_id":             c.stringAt(federation, append(ciEvidenceBase, "poolId")...),
+		"repository_owner_id": c.stringAt(federation, append(ciEvidenceBase, "repositoryOwnerId", "literal")...),
+		"repository_ids":      ciEvidenceRepositoryIDs,
+		"writer": map[string]any{
+			"provider_id":        c.stringAt(federation, append(ciEvidenceBase, "writer", "providerId")...),
+			"service_account_id": c.stringAt(federation, append(ciEvidenceBase, "writer", "serviceAccount", "accountId")...),
+			"job_workflow_ref":   ciEvidenceWriterWorkflowRef,
+		},
+		"verifier": map[string]any{
+			"provider_id":        c.stringAt(federation, append(ciEvidenceBase, "verifier", "providerId")...),
+			"service_account_id": c.stringAt(federation, append(ciEvidenceBase, "verifier", "serviceAccount", "accountId")...),
+			"repository_id":      c.stringAt(federation, append(ciEvidenceBase, "verifier", "repositoryId", "literal")...),
+			"workflow_ref":       c.stringAt(federation, append(ciEvidenceBase, "verifier", "workflowRef", "literal")...),
+			"workflow_sha":       ciEvidenceVerifierWorkflowSHA,
+			"environment":        c.stringAt(federation, append(ciEvidenceBase, "verifier", "environment")...),
+		},
 	}
 
 	buildkiteBase := []string{"spec", "workloadIdentityProviders", "buildkite"}
@@ -2065,6 +2459,24 @@ func (c *compiler) rootTrustVariables() map[string]any {
 	signingPrincipals := append([]string{}, signingAdministrators...)
 	for _, name := range sortedKeys(c.objectAt(signing, "spec", "keys")) {
 		signers := c.resolvedList(signing, "spec", "keys", name, "signers")
+		if name == "github-config-plan-evidence" {
+			expected := "serviceAccount:github-config-plan@" + c.projectID("identity-root") + ".iam.gserviceaccount.com"
+			if len(signers) != 1 || signers[0] != expected {
+				c.problem("github-config plan-evidence signer must equal the compiler-derived github-config-plan identity %s", expected)
+			}
+		}
+		if name == "infrastructure-export" {
+			projectID := c.projectID("identity-root")
+			expected := []string{
+				"serviceAccount:development-apply@" + projectID + ".iam.gserviceaccount.com",
+				"serviceAccount:staging-apply@" + projectID + ".iam.gserviceaccount.com",
+				"serviceAccount:production-apply@" + projectID + ".iam.gserviceaccount.com",
+				"serviceAccount:restricted-apply@" + projectID + ".iam.gserviceaccount.com",
+			}
+			if !reflect.DeepEqual(signers, expected) {
+				c.problem("infrastructure-export signers must equal the four compiler-derived environment apply identities")
+			}
+		}
 		c.requireDistinct("signers for "+name, signers)
 		c.validateExplicitPrincipals("signers for "+name, signers, false)
 		c.requireServiceAccountPrincipals("signers for "+name, signers)
@@ -2148,6 +2560,7 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		"billing_account":                  billingAccount,
 		"default_region":                   c.stringAt(trust, "spec", "geographicalBoundary", "defaultLocation"),
 		"recovery_region":                  c.stringAt(trust, "spec", "geographicalBoundary", "recoveryLocation"),
+		"root_administrator_principal":     rootAdministrator,
 		"recovery_administrator_principal": recoveryAdministrator,
 		"projects":                         projectObjects,
 		"state_backends":                   stateBackends,
@@ -2160,10 +2573,14 @@ func (c *compiler) rootTrustVariables() map[string]any {
 			"reader_principals":        auditReaders,
 			"administrator_principals": auditAdministrators,
 		},
-		"workforce": workforce,
-		"github":    github,
-		"buildkite": buildkite,
-		"gitops":    gitops,
+		"workforce":             workforce,
+		"github":                github,
+		"github_config":         githubConfig,
+		"github_infrastructure": githubInfrastructure,
+		"github_ci_evidence":    githubCiEvidence,
+		"github_activation":     githubActivation,
+		"buildkite":             buildkite,
+		"gitops":                gitops,
 		"signing": map[string]any{
 			"location":       c.stringAt(signing, "spec", "location"),
 			"key_ring_name":  c.stringAt(signing, "spec", "keyRing"),
@@ -2294,7 +2711,7 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 		if federationAudiences[name] != expectedFederationAudiences[name] {
 			c.problem("recovery context %s audience does not match deployed root-trust inputs", name)
 		}
-		if !strings.HasPrefix(federationAudiences[name], "https://") && !strings.HasPrefix(federationAudiences[name], "//iam.googleapis.com/") {
+		if federationAudiences[name] != "sts.googleapis.com" && !strings.HasPrefix(federationAudiences[name], "https://") && !strings.HasPrefix(federationAudiences[name], "//iam.googleapis.com/") {
 			c.problem("recovery context %s audience must be HTTPS or canonical IAM", name)
 		}
 	}

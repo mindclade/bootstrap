@@ -5,6 +5,7 @@ variable "bootstrap" {
     billing_account                  = string
     default_region                   = string
     recovery_region                  = string
+    root_administrator_principal     = string
     recovery_administrator_principal = string
     labels                           = optional(map(string), {})
 
@@ -116,6 +117,81 @@ variable "bootstrap" {
       })
     })
 
+    github_ci_evidence = object({
+      activation_enabled  = bool
+      pool_id             = string
+      repository_owner_id = string
+      repository_ids      = map(string)
+      writer = object({
+        provider_id        = string
+        service_account_id = string
+        job_workflow_ref   = string
+      })
+      verifier = object({
+        provider_id        = string
+        service_account_id = string
+        repository_id      = string
+        workflow_ref       = string
+        workflow_sha       = string
+        environment        = string
+      })
+    })
+
+    github_config = object({
+      activation_enabled   = bool
+      pool_id              = string
+      issuer_uri           = string
+      repository_owner_id  = string
+      repository_id        = string
+      immutable_repository = string
+      repository_full_name = string
+      branch_ref           = string
+      identities = map(object({
+        provider_id        = string
+        service_account_id = string
+        subjects = list(object({
+          id            = string
+          workflow_ref  = string
+          context_type  = string
+          context_value = string
+          audience      = string
+        }))
+      }))
+    })
+
+    github_infrastructure = object({
+      pool_id              = string
+      issuer_uri           = string
+      repository_owner_id  = string
+      repository_id        = string
+      immutable_repository = string
+      repository_full_name = string
+      branch_ref           = string
+      workflow_ref         = string
+      drift = object({
+        activation_enabled = bool
+        subject_id         = string
+        provider_id        = string
+        service_account_id = string
+        workflow_ref       = string
+        environment        = string
+        audience           = string
+      })
+      identities = map(object({
+        provider_id        = string
+        service_account_id = string
+        environment        = string
+        audience           = string
+      }))
+    })
+
+    github_activation = object({
+      state              = string
+      active_subject_ids = list(string)
+      gated_subject_ids  = list(string)
+      blockers           = list(string)
+    })
+
     buildkite = object({
       pool_id            = string
       provider_id        = string
@@ -183,8 +259,18 @@ variable "bootstrap" {
   }
 
   validation {
+    condition     = can(regex("^group:[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.bootstrap.root_administrator_principal))
+    error_message = "root_administrator_principal must be one explicit group email principal."
+  }
+
+  validation {
     condition     = can(regex("^group:[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.bootstrap.recovery_administrator_principal))
     error_message = "recovery_administrator_principal must be one explicit group email principal."
+  }
+
+  validation {
+    condition     = var.bootstrap.root_administrator_principal != var.bootstrap.recovery_administrator_principal
+    error_message = "Root and recovery administrator principals must remain distinct."
   }
 
   validation {
@@ -309,51 +395,10 @@ locals {
     {
       for role in [
         "roles/cloudkms.admin",
-        "roles/iam.roleAdmin",
-        "roles/iam.serviceAccountAdmin",
-        "roles/privilegedaccessmanager.admin",
-        "roles/resourcemanager.projectIamAdmin",
-        "roles/serviceusage.serviceUsageAdmin",
-        "roles/storage.admin",
-        "roles/storagetransfer.user",
-        ] : "state:${role}" => {
-        project = var.bootstrap.projects.root_state.id
-        role    = role
-      }
-    },
-    {
-      for role in setunion(
-        setsubtract(local.recovery_administration_roles, ["roles/logging.admin"]),
-        ["roles/logging.configWriter"],
-        ) : "recovery:${role}" => {
-        project = var.bootstrap.projects.recovery.id
-        role    = role
-      }
-    },
-    {
-      "recovery:roles/privilegedaccessmanager.admin" = {
-        project = var.bootstrap.projects.recovery.id
-        role    = "roles/privilegedaccessmanager.admin"
-      }
-    },
-    {
-      for role in [
-        "roles/cloudkms.admin",
         "roles/resourcemanager.projectIamAdmin",
         "roles/serviceusage.serviceUsageAdmin",
         ] : "audit:${role}" => {
         project = var.bootstrap.projects.audit.id
-        role    = role
-      }
-    },
-    {
-      for role in [
-        "roles/cloudkms.admin",
-        "roles/privilegedaccessmanager.admin",
-        "roles/resourcemanager.projectIamAdmin",
-        "roles/serviceusage.serviceUsageAdmin",
-        ] : "signing:${role}" => {
-        project = var.bootstrap.projects.signing.id
         role    = role
       }
     },
@@ -503,6 +548,9 @@ module "github_federation" {
   service_account_ids  = var.bootstrap.github.service_account_ids
   audiences            = var.bootstrap.github.audiences
   workflow_refs        = var.bootstrap.github.workflow_refs
+  github_config        = var.bootstrap.github_config
+  infrastructure_live  = var.bootstrap.github_infrastructure
+  ci_evidence          = var.bootstrap.github_ci_evidence
 
   depends_on = [google_project_service.identity, google_project_service.state]
 }
@@ -579,9 +627,12 @@ module "recovery_state" {
   location            = var.bootstrap.recovery_region
   replica_location    = var.bootstrap.default_region
   plan_principal      = local.plan_principal
-  apply_principal     = local.apply_principal
-  recovery_principal  = local.recovery_principal
-  labels              = var.bootstrap.labels
+  # Recovery-plane state mutation is deliberately excluded from the standing
+  # GitHub apply identity. Independently authenticated recovery custodians own
+  # the only backend-writer path until a separately qualified JIT grant exists.
+  apply_principal    = var.bootstrap.recovery_administrator_principal
+  recovery_principal = local.recovery_principal
+  labels             = var.bootstrap.labels
 
   depends_on = [
     google_project_iam_member.apply_administration,
@@ -592,15 +643,16 @@ module "recovery_state" {
 module "audit_root" {
   source = "../../modules/audit-root"
 
-  organization_id          = var.bootstrap.organization_id
-  billing_account          = var.bootstrap.billing_account
-  project_id               = var.bootstrap.projects.audit.id
-  project_name             = var.bootstrap.projects.audit.name
-  buckets                  = local.audit_buckets
-  sinks                    = var.bootstrap.audit.sinks
-  retention_days           = var.bootstrap.audit.retention_days
-  lock_after_qualification = var.bootstrap.audit.lock_after_qualification
-  reader_principals        = var.bootstrap.audit.reader_principals
+  organization_id           = var.bootstrap.organization_id
+  billing_account           = var.bootstrap.billing_account
+  project_id                = var.bootstrap.projects.audit.id
+  project_name              = var.bootstrap.projects.audit.name
+  buckets                   = local.audit_buckets
+  sinks                     = var.bootstrap.audit.sinks
+  retention_days            = var.bootstrap.audit.retention_days
+  lock_after_qualification  = var.bootstrap.audit.lock_after_qualification
+  reader_principals         = var.bootstrap.audit.reader_principals
+  recovery_reader_principal = local.recovery_principal
   administrator_principals = setunion(
     var.bootstrap.audit.administrator_principals,
     [local.apply_principal],
@@ -609,6 +661,19 @@ module "audit_root" {
   labels         = var.bootstrap.labels
 
   depends_on = [google_project_service.state]
+}
+
+resource "google_organization_iam_audit_config" "storage_data_access" {
+  org_id  = var.bootstrap.organization_id
+  service = "storage.googleapis.com"
+
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
 }
 
 module "workforce_identity" {
@@ -632,19 +697,19 @@ module "workforce_identity" {
 module "signing_root" {
   source = "../../modules/signing-root"
 
-  organization_id = var.bootstrap.organization_id
-  billing_account = var.bootstrap.billing_account
-  project_id      = var.bootstrap.projects.signing.id
-  project_name    = var.bootstrap.projects.signing.name
-  location        = var.bootstrap.signing.location
-  key_ring_name   = var.bootstrap.signing.key_ring_name
-  administrator_principals = setunion(
-    var.bootstrap.signing.administrators,
-    [local.apply_principal],
-  )
+  organization_id             = var.bootstrap.organization_id
+  billing_account             = var.bootstrap.billing_account
+  project_id                  = var.bootstrap.projects.signing.id
+  project_name                = var.bootstrap.projects.signing.name
+  location                    = var.bootstrap.signing.location
+  key_ring_name               = var.bootstrap.signing.key_ring_name
+  administrator_principals    = var.bootstrap.signing.administrators
   recovery_verifier_principal = local.recovery_principal
   keys                        = local.signing_keys
+  disabled_signing_keys       = toset(["infrastructure-export"])
   labels                      = var.bootstrap.labels
+
+  depends_on = [module.github_federation]
 }
 
 module "break_glass" {
@@ -713,11 +778,14 @@ resource "google_organization_iam_custom_role" "plan_read" {
 }
 
 resource "google_organization_iam_custom_role" "recovery_sink_read" {
-  org_id          = var.bootstrap.organization_id
-  role_id         = "bootstrapRecoverySinkRead"
-  title           = "Bootstrap recovery sink read"
-  description     = "Describe only the four fixed organization audit sinks during the quarterly recovery drill"
-  permissions     = ["logging.sinks.get"]
+  org_id      = var.bootstrap.organization_id
+  role_id     = "bootstrapRecoverySinkRead"
+  title       = "Bootstrap recovery sink read"
+  description = "Describe fixed organization audit sinks and verify the Storage Data Access audit configuration"
+  permissions = [
+    "logging.sinks.get",
+    "resourcemanager.organizations.getIamPolicy",
+  ]
   stage           = "GA"
   deletion_policy = "PREVENT"
 
@@ -758,7 +826,7 @@ resource "google_organization_iam_member" "recovery_sink_read" {
 resource "google_organization_iam_member" "apply_iam" {
   org_id = var.bootstrap.organization_id
   role   = "organizations/${var.bootstrap.organization_id}/roles/${google_organization_iam_custom_role.apply_iam.role_id}"
-  member = local.apply_principal
+  member = var.bootstrap.root_administrator_principal
 }
 
 resource "google_organization_iam_member" "plan_workforce_viewer" {
@@ -770,17 +838,17 @@ resource "google_organization_iam_member" "plan_workforce_viewer" {
 resource "google_organization_iam_member" "apply_logging_config_writer" {
   org_id = var.bootstrap.organization_id
   role   = "roles/logging.configWriter"
-  member = local.apply_principal
+  member = var.bootstrap.root_administrator_principal
 }
 
 resource "google_organization_iam_member" "apply_workforce_admin" {
   org_id = var.bootstrap.organization_id
   role   = "roles/iam.workforcePoolAdmin"
-  member = local.apply_principal
+  member = var.bootstrap.root_administrator_principal
 }
 
 resource "google_organization_iam_member" "apply_organization_role_admin" {
   org_id = var.bootstrap.organization_id
   role   = "roles/iam.organizationRoleAdmin"
-  member = local.apply_principal
+  member = var.bootstrap.root_administrator_principal
 }

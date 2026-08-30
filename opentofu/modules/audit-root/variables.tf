@@ -96,6 +96,16 @@ variable "reader_principals" {
   }
 }
 
+variable "recovery_reader_principal" {
+  description = "Dedicated recovery identity allowed to query only the protected audit-bucket views."
+  type        = string
+
+  validation {
+    condition     = can(regex("^serviceAccount:bootstrap-recovery@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$", var.recovery_reader_principal))
+    error_message = "recovery_reader_principal must be the explicit bootstrap-recovery service account."
+  }
+}
+
 variable "administrator_principals" {
   description = "Principals allowed to administer logging configuration but not KMS keys."
   type        = set(string)

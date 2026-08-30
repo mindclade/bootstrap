@@ -7,16 +7,22 @@ metadata:
     github.com/project-slug: mindclade/bootstrap
     mindclade.dev/security-owner: security
     mindclade.dev/authority-boundary: ring-0-only
+    mindclade.dev/trust-tier: ring-0
+    mindclade.dev/recovery-tier: isolated-ring-0
 spec:
   type: bootstrap-control-plane
-  lifecycle: production
-  maturity: production
-  owner: platform-operations
+  lifecycle: pre-production
+  maturity: pre-production
+  owner: security
   security_reviewers:
     - security
+  operational_reviewers:
+    - platform-operations
   repository_class: infrastructure-source
   data_classification: restricted
-  production_authority: true
+  trust_tier: ring-0
+  recovery_tier: isolated-ring-0
+  production_authority: false
   dependencies: []
   provides:
     - ring0-state-backends-v1
@@ -35,5 +41,5 @@ spec:
     source_ready:
       description: Source, metadata, policy, tests, and required reviews are complete; no external mutation is implied.
     connected:
-      description: GitHub and GCP controls have been independently verified against the exact qualified commit.
+      description: Requires external proof of exact-commit GitHub/GCP controls plus a generation-bound isolated restore and downstream reattachment; repository observation alone cannot qualify it.
   license: Mindclade Proprietary License

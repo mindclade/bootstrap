@@ -56,14 +56,20 @@ locals {
             }
           },
         ] : [],
-        [
+        bucket_key == "primary" ? [
           {
-            key       = "${bucket_key}-apply"
-            bucket    = bucket_key
-            role      = "roles/storage.objectAdmin"
-            member    = var.apply_principal
-            condition = null
+            key    = "${bucket_key}-apply"
+            bucket = bucket_key
+            role   = "roles/storage.objectAdmin"
+            member = var.apply_principal
+            condition = {
+              title       = "bootstrap-apply-primary-state-and-lock"
+              description = "Permit the approved backend writer to access only the exact state and native lock objects."
+              expression  = "resource.name == 'projects/_/buckets/${local.buckets[bucket_key].name}/objects/${var.backend_prefix}/default.tfstate' || resource.name == 'projects/_/buckets/${local.buckets[bucket_key].name}/objects/${var.backend_prefix}/default.tflock'"
+            }
           },
+        ] : [],
+        [
           {
             key    = "${bucket_key}-recovery"
             bucket = bucket_key

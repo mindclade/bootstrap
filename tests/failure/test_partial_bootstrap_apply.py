@@ -1,5 +1,6 @@
 """Failure tests for plan/evidence integrity after a partial bootstrap attempt."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -475,6 +476,166 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(verify.returncode, 0, verify.stderr)
+
+    def test_approval_receipt_requires_two_distinct_signers_and_exact_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            keys = []
+            approvers = []
+            for index, principal in enumerate(
+                ("user:platform@example.com", "user:security@example.com"), 1
+            ):
+                private_key = directory / f"approver-{index}.key"
+                public_key = directory / f"approver-{index}.pem"
+                public_der = directory / f"approver-{index}.der"
+                subprocess.run(
+                    [
+                        "openssl",
+                        "ecparam",
+                        "-name",
+                        "prime256v1",
+                        "-genkey",
+                        "-noout",
+                        "-out",
+                        str(private_key),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    [
+                        "openssl",
+                        "pkey",
+                        "-in",
+                        str(private_key),
+                        "-pubout",
+                        "-out",
+                        str(public_key),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    [
+                        "openssl",
+                        "pkey",
+                        "-pubin",
+                        "-in",
+                        str(public_key),
+                        "-outform",
+                        "DER",
+                        "-out",
+                        str(public_der),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                keys.append((private_key, public_key))
+                approvers.append(
+                    {
+                        "principal": principal,
+                        "publicKeySha256": hashlib.sha256(
+                            public_der.read_bytes()
+                        ).hexdigest(),
+                    }
+                )
+
+            receipt = {
+                "schemaVersion": "mindclade.bootstrap/approval-receipt/v1",
+                "operation": "apply",
+                "sourceSha": "b" * 40,
+                "root": "root-trust",
+                "subjectKind": "opentofu-saved-plan",
+                "subjectSha256": "a" * 64,
+                "planRunId": "12345",
+                "issuedAt": "2026-08-30T12:00:00Z",
+                "expiresAt": "2026-08-30T13:00:00Z",
+                "approvers": approvers,
+            }
+            receipt_path = directory / "receipt.json"
+            receipt_path.write_text(
+                json.dumps(receipt, separators=(",", ":")), encoding="utf-8"
+            )
+            signature_paths = []
+            for index, (private_key, _) in enumerate(keys, 1):
+                signature = directory / f"signature-{index}.bin"
+                subprocess.run(
+                    [
+                        "openssl",
+                        "dgst",
+                        "-sha256",
+                        "-sign",
+                        str(private_key),
+                        "-out",
+                        str(signature),
+                        str(receipt_path),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                signature_paths.append(signature)
+
+            command = [
+                str(self.bootstrapctl),
+                "approval",
+                "verify",
+                "--receipt",
+                str(receipt_path),
+                "--public-key-1",
+                str(keys[0][1]),
+                "--public-key-2",
+                str(keys[1][1]),
+                "--signature-1",
+                str(signature_paths[0]),
+                "--signature-2",
+                str(signature_paths[1]),
+                "--operation",
+                "apply",
+                "--source-sha",
+                "b" * 40,
+                "--root",
+                "root-trust",
+                "--subject-kind",
+                "opentofu-saved-plan",
+                "--subject-sha256",
+                "a" * 64,
+                "--plan-run-id",
+                "12345",
+                "--now",
+                "2026-08-30T12:15:00Z",
+            ]
+            verified = subprocess.run(
+                command, text=True, capture_output=True, check=False
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+
+            wrong_source = command.copy()
+            source_index = wrong_source.index("--source-sha") + 1
+            wrong_source[source_index] = "c" * 40
+            rejected = subprocess.run(
+                wrong_source, text=True, capture_output=True, check=False
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("does not match the exact requested", rejected.stderr)
+
+            expired = command.copy()
+            now_index = expired.index("--now") + 1
+            expired[now_index] = "2026-08-30T13:00:00Z"
+            rejected = subprocess.run(
+                expired, text=True, capture_output=True, check=False
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("not currently valid", rejected.stderr)
+
+            receipt["approvers"][1]["principal"] = "user:platform@example.com"
+            receipt_path.write_text(
+                json.dumps(receipt, separators=(",", ":")), encoding="utf-8"
+            )
+            rejected = subprocess.run(
+                command, text=True, capture_output=True, check=False
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("distinct and sorted", rejected.stderr)
 
 
 if __name__ == "__main__":
