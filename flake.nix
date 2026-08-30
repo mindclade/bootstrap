@@ -88,7 +88,9 @@
             unzip -q "$archive" -d "$TMPDIR/unpack"
             install -D -m 0755 "$TMPDIR/unpack/tofu" "$out/bin/tofu"
           '';
-          toolchainPackages = with pkgs; [
+          toolchainPackages =
+            with pkgs;
+            [
             actionlint
             bash
             bazelisk
@@ -114,8 +116,9 @@
             tofu
             unzip
             yamllint
-            yq-go
-          ];
+              yq-go
+            ]
+            ++ lib.optionals stdenv.hostPlatform.isDarwin [ darwin.libresolv ];
           toolchain = pkgs.buildEnv {
             name = "mindclade-bootstrap-toolchain";
             paths = toolchainPackages;
@@ -136,8 +139,11 @@
         system: pkgs:
         let
           toolchain = self.packages.${system}.toolchain;
+          darwinDeploymentTarget = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "14.0";
           common = {
             packages = [ toolchain ];
+            BAZEL_NIX_LINKOPT = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "-L${pkgs.darwin.libresolv}/lib";
+            MACOSX_DEPLOYMENT_TARGET = darwinDeploymentTarget;
             LANG = "C.UTF-8";
             LC_ALL = "C.UTF-8";
             TZ = "UTC";
@@ -156,6 +162,7 @@
         system: pkgs:
         let
           toolchain = self.packages.${system}.toolchain;
+          darwinDeploymentTarget = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "14.0";
           bootstrapctl = pkgs.buildGoModule {
             pname = "bootstrapctl";
             version = "0.0.0";
@@ -169,18 +176,23 @@
             nativeBuildInputs = [ toolchain ];
           } ''
             set -euo pipefail
-            test "$(actionlint -version)" = "1.7.12"
-            test "$(conftest --version)" = "Conftest: 0.69.0"
+            test "$(actionlint -version | head -n1)" = "1.7.12"
+            test "$(conftest --version | head -n1)" = "Conftest: 0.69.0"
             test "$(go version | awk '{print $3}')" = "go1.26.7"
             test "$(just --version)" = "just 1.58.0"
-            test "$(opa version --format json | jq -r .version)" = "1.20.1"
+            test "$(opa version | awk '/^Version:/ {print $2}')" = "1.20.1"
             test "$(python3 -c 'import platform; print(platform.python_version())')" = "3.14.7"
             test "$(tofu version -json | jq -r .terraform_version)" = "1.12.6"
             test "${pkgs.bazelisk.version}" = "1.29.0"
             test "${pkgs.google-cloud-sdk.version}" = "581.0.0"
+            if test "${system}" = "aarch64-darwin"; then
+              test "${darwinDeploymentTarget}" = "14.0"
+            else
+              test -z "${darwinDeploymentTarget}"
+            fi
             grep -Fq 'go_sdk.download(version = "1.26.7")' ${self}/MODULE.bazel
             grep -Fq 'python_version = "3.14.7"' ${self}/MODULE.bazel
-            grep -Fq 'USE_BAZEL_VERSION := "9.1.1"' ${self}/justfile
+            grep -Fq 'USE_BAZEL_VERSION=9.1.1 bazelisk test' ${self}/justfile
             mkdir -p "$out"
             printf '%s\n' '${nixpkgs.rev}' > "$out/nixpkgs-revision"
           '';

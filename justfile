@@ -84,7 +84,7 @@ test-python:
       tests/recovery/test_isolated_restore.py
 
 test-bazel:
-    USE_BAZEL_VERSION=9.1.1 bazel test --lockfile_mode=off //...
+    @bazel_args=(); if test -n "${BAZEL_NIX_LINKOPT:-}"; then bazel_args+=("--linkopt=${BAZEL_NIX_LINKOPT}"); fi; if test -n "${MACOSX_DEPLOYMENT_TARGET:-}"; then bazel_args+=("--repo_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--action_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--copt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" "--linkopt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"); fi; USE_BAZEL_VERSION=9.1.1 bazelisk test --lockfile_mode=off "${bazel_args[@]}" //...
 
 test: test-go test-python test-bazel
 

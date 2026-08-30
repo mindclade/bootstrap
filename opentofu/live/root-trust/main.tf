@@ -187,6 +187,7 @@ variable "bootstrap" {
 
     github_activation = object({
       state              = string
+      exception_ref      = optional(string)
       active_subject_ids = list(string)
       gated_subject_ids  = list(string)
       blockers           = list(string)
@@ -573,6 +574,7 @@ module "github_federation" {
   github_config        = var.bootstrap.github_config
   infrastructure_live  = var.bootstrap.github_infrastructure
   ci_evidence          = var.bootstrap.github_ci_evidence
+  activation           = var.bootstrap.github_activation
 
   depends_on = [google_project_service.identity, google_project_service.state]
 }

@@ -92,7 +92,7 @@ spec:
     github-config:
       platform: github
       projectRef: identity-root
-      activationEnabled: false
+      activationEnabled: true
       poolId: github-config
       issuerUri:
         valueFrom:
@@ -348,7 +348,8 @@ spec:
           accountId: gitops-bootstrap
           roles: []
   activation:
-    state: blocked
+    state: FOUNDER_BOOTSTRAPPED
+    exceptionRef: FBE-0001
     activeSubjectIds:
       - bootstrap-protected-plan
       - bootstrap-protected-apply
@@ -361,13 +362,12 @@ spec:
       - infrastructure-live-production-apply
       - infrastructure-live-restricted-plan
       - infrastructure-live-restricted-apply
-    gatedSubjectIds:
-      - github-config-drift-plan
       - github-config-protected-plan
       - github-config-protected-apply
+    gatedSubjectIds:
+      - github-config-drift-plan
       - infrastructure-drift-plan
       - infrastructure-ci-evidence-verifier
     blockers:
-      - github-config-control-plane-federation-not-connected-qualified
-      - infrastructure-drift-federation-not-connected-qualified
-      - ci-evidence-federation-not-connected-qualified
+      - independent-review-not-connected-qualified
+      - production-authority-disabled

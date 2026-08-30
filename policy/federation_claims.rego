@@ -215,10 +215,23 @@ deny contains violation if {
 deny contains violation if {
 	input.kind == "IdentityFederation"
 	provider := input.spec.workloadIdentityProviders["github-ci-evidence"]
+	input.spec.activation.state in {"BLOCKED", "FOUNDER_BOOTSTRAPPED"}
 	provider.activationEnabled != false
 	violation := {
 		"code": "CI_EVIDENCE_ACTIVATION_NOT_QUALIFIED",
-		"message": "CI evidence federation must remain disabled until connected qualification succeeds",
+		"message": "CI evidence federation must remain disabled until the lifecycle is CONNECTED_QUALIFIED",
+		"resource": "workloadIdentityProviders.github-ci-evidence.activationEnabled",
+	}
+}
+
+deny contains violation if {
+	input.kind == "IdentityFederation"
+	provider := input.spec.workloadIdentityProviders["github-ci-evidence"]
+	input.spec.activation.state == "CONNECTED_QUALIFIED"
+	provider.activationEnabled != true
+	violation := {
+		"code": "CI_EVIDENCE_ACTIVATION_NOT_QUALIFIED",
+		"message": "CI evidence federation must be enabled in the connected-qualified lifecycle",
 		"resource": "workloadIdentityProviders.github-ci-evidence.activationEnabled",
 	}
 }

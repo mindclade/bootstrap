@@ -50,7 +50,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.26.6"
+  GO_VERSION: "1.26.7"
   TOFU_VERSION: "1.12.6"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"

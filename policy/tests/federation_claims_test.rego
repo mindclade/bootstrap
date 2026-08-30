@@ -82,28 +82,31 @@ valid_infrastructure := {
 
 valid_input := {
 	"kind": "IdentityFederation",
-	"spec": {"workloadIdentityProviders": {
-		"github": valid_provider("github", {
-			"repository_owner_id": {"valueFrom": {"env": "OWNER_ID"}},
-			"repository_id": {"valueFrom": {"env": "REPOSITORY_ID"}},
-			"ref": {"literal": "refs/heads/main"},
-			"workflow_ref": {"valueFrom": {"env": "WORKFLOW_REF"}},
-		}),
-		"github-ci-evidence": valid_ci_evidence,
-		"github-infrastructure": valid_infrastructure,
-		"buildkite": valid_provider("buildkite", {
-			"organization_slug": {"valueFrom": {"env": "ORGANIZATION_SLUG"}},
-			"pipeline_slug": {"valueFrom": {"env": "PIPELINE_SLUG"}},
-			"pipeline_id": {"valueFrom": {"env": "PIPELINE_ID"}},
-			"build_branch": {"literal": "main"},
-			"step_key": {"literal": "bootstrap-ring0-signing"},
-		}),
-		"gitops": valid_provider("gitops", {
-			"repository": {"valueFrom": {"env": "GITOPS_REPOSITORY"}},
-			"ref": {"literal": "refs/heads/main"},
-			"subject": {"valueFrom": {"env": "GITOPS_SUBJECT"}},
-		}),
-	}},
+	"spec": {
+		"activation": {"state": "FOUNDER_BOOTSTRAPPED"},
+		"workloadIdentityProviders": {
+			"github": valid_provider("github", {
+				"repository_owner_id": {"valueFrom": {"env": "OWNER_ID"}},
+				"repository_id": {"valueFrom": {"env": "REPOSITORY_ID"}},
+				"ref": {"literal": "refs/heads/main"},
+				"workflow_ref": {"valueFrom": {"env": "WORKFLOW_REF"}},
+			}),
+			"github-ci-evidence": valid_ci_evidence,
+			"github-infrastructure": valid_infrastructure,
+			"buildkite": valid_provider("buildkite", {
+				"organization_slug": {"valueFrom": {"env": "ORGANIZATION_SLUG"}},
+				"pipeline_slug": {"valueFrom": {"env": "PIPELINE_SLUG"}},
+				"pipeline_id": {"valueFrom": {"env": "PIPELINE_ID"}},
+				"build_branch": {"literal": "main"},
+				"step_key": {"literal": "bootstrap-ring0-signing"},
+			}),
+			"gitops": valid_provider("gitops", {
+				"repository": {"valueFrom": {"env": "GITOPS_REPOSITORY"}},
+				"ref": {"literal": "refs/heads/main"},
+				"subject": {"valueFrom": {"env": "GITOPS_SUBJECT"}},
+			}),
+		},
+	},
 }
 
 test_exact_claims_are_allowed if {
@@ -157,7 +160,18 @@ test_primitive_viewer_role_is_denied if {
 test_ci_evidence_activation_is_fail_closed if {
 	bad_evidence := object.union(valid_ci_evidence, {"activationEnabled": true})
 	providers := object.union(valid_input.spec.workloadIdentityProviders, {"github-ci-evidence": bad_evidence})
-	candidate := object.union(valid_input, {"spec": {"workloadIdentityProviders": providers}})
+	spec := object.union(valid_input.spec, {"workloadIdentityProviders": providers})
+	candidate := object.union(valid_input, {"spec": spec})
+	violations := deny with input as candidate
+	some violation in violations
+	violation.code == "CI_EVIDENCE_ACTIVATION_NOT_QUALIFIED"
+}
+
+test_blocked_ci_evidence_activation_is_fail_closed if {
+	bad_evidence := object.union(valid_ci_evidence, {"activationEnabled": true})
+	providers := object.union(valid_input.spec.workloadIdentityProviders, {"github-ci-evidence": bad_evidence})
+	blocked_spec := object.union(valid_input.spec, {"activation": {"state": "BLOCKED"}, "workloadIdentityProviders": providers})
+	candidate := object.union(valid_input, {"spec": blocked_spec})
 	violations := deny with input as candidate
 	some violation in violations
 	violation.code == "CI_EVIDENCE_ACTIVATION_NOT_QUALIFIED"

@@ -529,7 +529,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
             '"assertion.workflow_sha == assertion.sha"', module
         )
         self.assertIn(
-            '"assertion.repository_visibility == \'private\'"', module
+            '"assertion.repository_visibility == \'public\'"', module
         )
         self.assertIn('"assertion.repository ==', module)
         self.assertNotIn('"attribute.repo"', module)
@@ -696,7 +696,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
             *[
                 (
                     f"github-config {role}",
-                    f"Exact activation-gated GitHub trust for github-config {role}",
+                    f"Exact lifecycle-controlled GitHub trust for github-config {role}",
                 )
                 for role in ("plan", "apply")
             ],
@@ -709,7 +709,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
             ],
             (
                 "infrastructure-live drift plan",
-                "Exact activation-gated GitHub trust for infrastructure-live drift observation",
+                "Exact lifecycle-controlled GitHub trust for infrastructure-live drift observation",
             ),
             *[
                 (
@@ -789,7 +789,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertIn("Move the generated recovery credentials outside the source tree", recovery)
         self.assertIn("GOOGLE_GHA_CREDS_PATH", recovery)
 
-    def test_ci_evidence_federation_is_disabled_isolated_and_keyless(self):
+    def test_ci_evidence_federation_is_founder_bootstrapped_isolated_and_keyless(self):
         module = (
             self.repository_root
             / "opentofu"
@@ -807,11 +807,19 @@ class ManifestSchemaContractTest(unittest.TestCase):
         manifest = (
             self.repository_root / "manifests" / "identity-federation.yaml"
         ).read_text(encoding="utf-8")
-        self.assertIn("activationEnabled: false", manifest)
+        self.assertIn("state: FOUNDER_BOOTSTRAPPED", manifest)
+        self.assertIn("exceptionRef: FBE-0001", manifest)
         self.assertIn('pool_id == "github-ci-evidence"', variables)
         self.assertIn('resource "google_iam_workload_identity_pool" "ci_evidence"', module)
         self.assertIn(
-            "var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}",
+            "local.connected_federation_state && var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}",
+            module,
+        )
+        self.assertIn(
+            "if contains(var.activation.active_subject_ids, subject.id)", module
+        )
+        self.assertIn(
+            'service_account_id = "projects/${var.project_id}/serviceAccounts/${each.value.service_email}"',
             module,
         )
         self.assertIn('"attribute.evidence_role"', module)
@@ -819,7 +827,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertIn("assertion.job_workflow_ref ==", module)
         self.assertIn("assertion.job_workflow_sha ==", module)
         self.assertIn("assertion.workflow_sha ==", module)
-        self.assertIn("assertion.repository_visibility in ['internal', 'private']", module)
+        self.assertIn("assertion.repository_visibility == 'public'", module)
         self.assertIn("assertion.runner_environment == 'github-hosted'", module)
         self.assertIn("Omitting allowed_audiences", module)
         self.assertNotIn("var.ci_evidence.writer.audience", module)
@@ -1313,7 +1321,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 ci_evidence["verifier"]["service_account_id"],
             )
             github_config = first_payload["bootstrap"]["github_config"]
-            self.assertFalse(github_config["activation_enabled"])
+            self.assertTrue(github_config["activation_enabled"])
             self.assertEqual(github_config["pool_id"], "github-config")
             self.assertEqual(
                 {
@@ -1401,9 +1409,24 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 },
             )
             activation = first_payload["bootstrap"]["github_activation"]
-            self.assertEqual(activation["state"], "blocked")
-            self.assertEqual(len(activation["active_subject_ids"]), 11)
-            self.assertEqual(len(activation["gated_subject_ids"]), 5)
+            self.assertEqual(activation["state"], "FOUNDER_BOOTSTRAPPED")
+            self.assertEqual(activation["exception_ref"], "FBE-0001")
+            self.assertEqual(len(activation["active_subject_ids"]), 13)
+            self.assertEqual(
+                set(activation["gated_subject_ids"]),
+                {
+                    "github-config-drift-plan",
+                    "infrastructure-drift-plan",
+                    "infrastructure-ci-evidence-verifier",
+                },
+            )
+            self.assertEqual(
+                activation["blockers"],
+                [
+                    "independent-review-not-connected-qualified",
+                    "production-authority-disabled",
+                ],
+            )
             self.assertEqual(
                 set(activation["active_subject_ids"])
                 | set(activation["gated_subject_ids"]),
