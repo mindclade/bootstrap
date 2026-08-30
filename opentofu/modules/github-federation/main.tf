@@ -82,7 +82,7 @@ locals {
   github_config_subject_conditions = {
     for key, identity in local.github_config_identities : key => [
       for subject in identity.subjects : join(" && ", [
-        "assertion.sub == 'repo:${var.github_config.immutable_repository}:context:${subject.context_type}%3A${subject.context_value}:workflow_ref:${subject.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
+        "assertion.sub == 'repo:${var.github_config.immutable_repository}:${subject.context_type}:${subject.context_value}:workflow_ref:${subject.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
         "assertion.workflow_ref == '${subject.workflow_ref}'",
         "assertion.workflow_sha == assertion.sha",
         subject.context_type == "environment" ? "assertion.environment == '${subject.context_value}'" : "assertion.ref == '${subject.context_value}'",
@@ -101,6 +101,7 @@ resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = each.value.pool_id
   display_name              = "bootstrap GitHub ${each.key}"
   description               = "Isolated GitHub OIDC trust for bootstrap ${each.key} operations"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -116,11 +117,11 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "bootstrap GitHub ${each.key}"
   description                        = "Claim-restricted GitHub provider for bootstrap ${each.key} operations"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {
-    "google.subject"                  = "assertion.sub"
-    "attribute.repo"                  = "assertion.repo"
+    "google.subject"                  = "'bootstrap-${each.key}:' + assertion.repository_id"
     "attribute.repository_id"         = "assertion.repository_id"
     "attribute.repository_owner_id"   = "assertion.repository_owner_id"
     "attribute.ref"                   = "assertion.ref"
@@ -133,8 +134,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 
   attribute_condition = join(" && ", [
-    "assertion.sub == 'repo:${local.immutable_repository}:context:environment%3A${each.value.environment}:workflow_ref:${each.value.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
-    "assertion.repo == '${local.immutable_repository}'",
+    "assertion.sub == 'repo:${local.immutable_repository}:environment:${each.value.environment}:workflow_ref:${each.value.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
     "assertion.repository == '${var.repository_full_name}'",
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_id == '${var.repository_id}'",
@@ -192,6 +192,7 @@ resource "google_iam_workload_identity_pool" "github_config" {
   workload_identity_pool_id = var.github_config.pool_id
   display_name              = "github-config GitHub"
   description               = "Activation-gated GitHub OIDC trust for github-config"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -207,23 +208,22 @@ resource "google_iam_workload_identity_pool_provider" "github_config" {
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "github-config ${each.key}"
   description                        = "Exact activation-gated GitHub trust for github-config ${each.key}"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {
-    "google.subject"                  = "assertion.sub"
-    "attribute.repo"                  = "assertion.repo"
-    "attribute.repository_id"         = "assertion.repository_id"
-    "attribute.repository_owner_id"   = "assertion.repository_owner_id"
-    "attribute.ref"                   = "assertion.ref"
-    "attribute.workflow_ref"          = "assertion.workflow_ref"
-    "attribute.workflow_sha"          = "assertion.workflow_sha"
-    "attribute.environment"           = "assertion.environment"
-    "attribute.repository_visibility" = "assertion.repository_visibility"
-    "attribute.runner_environment"    = "assertion.runner_environment"
+    "google.subject"                   = "'github-config-${each.key}:' + assertion.repository_id"
+    "attribute.github_config_identity" = "'${each.key}'"
+    "attribute.repository_id"          = "assertion.repository_id"
+    "attribute.repository_owner_id"    = "assertion.repository_owner_id"
+    "attribute.ref"                    = "assertion.ref"
+    "attribute.workflow_ref"           = "assertion.workflow_ref"
+    "attribute.workflow_sha"           = "assertion.workflow_sha"
+    "attribute.repository_visibility"  = "assertion.repository_visibility"
+    "attribute.runner_environment"     = "assertion.runner_environment"
   }
 
   attribute_condition = join(" && ", [
-    "assertion.repo == '${var.github_config.immutable_repository}'",
     "assertion.repository == '${var.github_config.repository_full_name}'",
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.github_config.repository_owner_id}'",
@@ -262,7 +262,7 @@ resource "google_service_account_iam_member" "github_config" {
 
   service_account_id = google_service_account.github_config[each.key].name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_config["pool"].name}/attribute.repository_id/${var.github_config.repository_id}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_config["pool"].name}/attribute.github_config_identity/${each.key}"
 
   depends_on = [google_iam_workload_identity_pool_provider.github_config]
 }
@@ -274,6 +274,7 @@ resource "google_iam_workload_identity_pool" "infrastructure_live" {
   workload_identity_pool_id = var.infrastructure_live.pool_id
   display_name              = "infrastructure-live GitHub"
   description               = "Environment and role separated GitHub OIDC trust for infrastructure-live"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -287,14 +288,14 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_live" {
   project                            = var.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.infrastructure_live["pool"].workload_identity_pool_id
   workload_identity_pool_provider_id = each.value.provider_id
-  display_name                       = "infrastructure-live ${each.key}"
+  display_name                       = "infra-live ${each.key}"
   description                        = "Exact immutable GitHub trust for infrastructure-live ${each.key}"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {
-    "google.subject"                    = "assertion.sub"
+    "google.subject"                    = "'infrastructure-live-${each.key}:' + assertion.repository_id"
     "attribute.infrastructure_identity" = "'${each.key}'"
-    "attribute.repo"                    = "assertion.repo"
     "attribute.repository_id"           = "assertion.repository_id"
     "attribute.repository_owner_id"     = "assertion.repository_owner_id"
     "attribute.workflow_ref"            = "assertion.workflow_ref"
@@ -303,8 +304,7 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_live" {
   }
 
   attribute_condition = join(" && ", [
-    "assertion.sub == 'repo:${var.infrastructure_live.immutable_repository}:context:environment%3A${each.value.environment}:workflow_ref:${var.infrastructure_live.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
-    "assertion.repo == '${var.infrastructure_live.immutable_repository}'",
+    "assertion.sub == 'repo:${var.infrastructure_live.immutable_repository}:environment:${each.value.environment}:workflow_ref:${var.infrastructure_live.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
     "assertion.repository == '${var.infrastructure_live.repository_full_name}'",
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.infrastructure_live.repository_owner_id}'",
@@ -363,12 +363,12 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_drift" {
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "infrastructure-live drift plan"
   description                        = "Exact activation-gated GitHub trust for infrastructure-live drift observation"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {
-    "google.subject"                    = "assertion.sub"
+    "google.subject"                    = "'infrastructure-live-drift-plan:' + assertion.repository_id"
     "attribute.infrastructure_identity" = "'drift-plan'"
-    "attribute.repo"                    = "assertion.repo"
     "attribute.repository_id"           = "assertion.repository_id"
     "attribute.repository_owner_id"     = "assertion.repository_owner_id"
     "attribute.workflow_ref"            = "assertion.workflow_ref"
@@ -377,8 +377,7 @@ resource "google_iam_workload_identity_pool_provider" "infrastructure_drift" {
   }
 
   attribute_condition = join(" && ", [
-    "assertion.sub == 'repo:${var.infrastructure_live.immutable_repository}:context:environment%3A${each.value.environment}:workflow_ref:${each.value.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
-    "assertion.repo == '${var.infrastructure_live.immutable_repository}'",
+    "assertion.sub == 'repo:${var.infrastructure_live.immutable_repository}:environment:${each.value.environment}:workflow_ref:${each.value.workflow_ref}:workflow_sha:' + assertion.workflow_sha",
     "assertion.repository == '${var.infrastructure_live.repository_full_name}'",
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_owner_id == '${var.infrastructure_live.repository_owner_id}'",
@@ -432,6 +431,7 @@ resource "google_iam_workload_identity_pool" "ci_evidence" {
   workload_identity_pool_id = var.ci_evidence.pool_id
   display_name              = "GitHub CI evidence"
   description               = "Dedicated GitHub OIDC trust for immutable CI evidence archival and verification"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -447,11 +447,12 @@ resource "google_iam_workload_identity_pool_provider" "ci_evidence" {
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "GitHub CI evidence ${each.key}"
   description                        = "Claim-restricted GitHub CI evidence ${each.key} identity"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = merge(
     {
-      "google.subject"                  = "assertion.sub"
+      "google.subject"                  = "'ci-evidence-${each.key}:' + assertion.repository_id"
       "attribute.evidence_role"         = "'${each.key}'"
       "attribute.repository_id"         = "assertion.repository_id"
       "attribute.repository_owner_id"   = "assertion.repository_owner_id"

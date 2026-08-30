@@ -296,7 +296,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "activation_window_start": "2026-08-29T00:00:00Z",
                 "rotation_deadline": "2026-11-27T00:00:00Z",
             }
-            for key in signing_versions
+            for key in (
+                "audit-anchor",
+                "bootstrap-handoff",
+                "recovery-evidence",
+            )
         }
         return {
             "schema_version": 1,
@@ -317,7 +321,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "federation_providers": {
                 "github-plan": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-github-plan/providers/github-actions-plan",
                 "github-apply": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-github-apply/providers/github-actions-apply",
-                "github-recovery": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-github-recovery/providers/github-actions-recovery",
+                "github-recovery": "projects/987654321/locations/global/workloadIdentityPools/bootstrap-github-recovery/providers/github-actions-recovery",
                 "buildkite": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-buildkite/providers/buildkite",
                 "gitops": "projects/123456789/locations/global/workloadIdentityPools/bootstrap-gitops/providers/gitops",
             },
@@ -1089,6 +1093,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     }
                 ],
                 "member": "serviceAccount:bootstrap-recovery@bootstrap-recovery.iam.gserviceaccount.com",
+                "role": "projects/bootstrap-signing/roles/bootstrapRecoverySigningMetadata",
             },
         )
         recovery["address"] = (
@@ -1099,7 +1104,6 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "crypto_key_id": True,
             "etag": True,
             "id": True,
-            "role": True,
         }
         resources.append(recovery)
 
@@ -1287,8 +1291,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "workload_identity_pool_provider_id": "github-actions-plan",
                 "disabled": False,
                 "attribute_mapping": {
-                    "google.subject": "assertion.sub",
-                    "attribute.repo": "assertion.repo",
+                    "google.subject": "'bootstrap-plan:' + assertion.repository_id",
                     "attribute.repository_id": "assertion.repository_id",
                     "attribute.repository_owner_id": "assertion.repository_owner_id",
                     "attribute.ref": "assertion.ref",
@@ -1301,8 +1304,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
                 "attribute_condition": " && ".join(
                     [
-                        "assertion.sub == 'repo:mindclade@316676129/bootstrap@1350991612:context:environment%3Atrusted-build:workflow_ref:mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main:workflow_sha:' + assertion.workflow_sha",
-                        "assertion.repo == 'mindclade@316676129/bootstrap@1350991612'",
+                        "assertion.sub == 'repo:mindclade@316676129/bootstrap@1350991612:environment:trusted-build:workflow_ref:mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main:workflow_sha:' + assertion.workflow_sha",
                         "assertion.repository == 'mindclade/bootstrap'",
                         "assertion.repository_owner == 'mindclade'",
                         "assertion.repository_id == '1350991612'",
@@ -1429,7 +1431,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         resources = [identity, pool]
         for role in ("writer", "verifier"):
             mapping = {
-                "google.subject": "assertion.sub",
+                "google.subject": (
+                    f"'ci-evidence-{role}:' + assertion.repository_id"
+                ),
                 "attribute.evidence_role": f"'{role}'",
                 "attribute.repository_id": "assertion.repository_id",
                 "attribute.repository_owner_id": "assertion.repository_owner_id",
@@ -1546,11 +1550,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             [
                 (
                     "assertion.sub == 'repo:"
-                    f"{immutable_repository}:context:environment%3A"
+                    f"{immutable_repository}:environment:"
                     f"{execution_environment}:workflow_ref:{workflow}:workflow_sha:' "
                     "+ assertion.workflow_sha"
                 ),
-                f"assertion.repo == '{immutable_repository}'",
                 "assertion.repository == 'mindclade/infrastructure-live'",
                 "assertion.repository_owner == 'mindclade'",
                 "assertion.repository_owner_id == '316676129'",
@@ -1573,9 +1576,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "workload_identity_pool_provider_id": identity,
                 "disabled": False,
                 "attribute_mapping": {
-                    "google.subject": "assertion.sub",
+                    "google.subject": (
+                        f"'infrastructure-live-{identity}:' + assertion.repository_id"
+                    ),
                     "attribute.infrastructure_identity": f"'{identity}'",
-                    "attribute.repo": "assertion.repo",
                     "attribute.repository_id": "assertion.repository_id",
                     "attribute.repository_owner_id": "assertion.repository_owner_id",
                     "attribute.workflow_ref": "assertion.workflow_ref",
@@ -2145,6 +2149,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "roles/iam.roleViewer",
                 "roles/iam.securityReviewer",
                 "roles/iam.serviceAccountViewer",
+                "roles/iam.workloadIdentityPoolViewer",
                 "roles/privilegedaccessmanager.viewer",
                 "roles/serviceusage.serviceUsageViewer",
                 "roles/storagetransfer.viewer",
@@ -3228,6 +3233,18 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+        collocated = self.public_trust_metadata()
+        collocated["federation_providers"]["github-recovery"] = collocated[
+            "federation_providers"
+        ]["github-recovery"].replace("projects/987654321/", "projects/123456789/")
+        resources[0]["change"]["after"]["content"] = json.dumps(collocated)
+        result = self.check_plan(resources)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("public trust contract", result.stderr)
+
+        resources[0]["change"]["after"]["content"] = json.dumps(
+            self.public_trust_metadata()
+        )
         metadata = json.loads(resources[0]["change"]["after"]["content"])
         removed_digest = metadata["manifest_digests"].pop(
             "manifests/trust-anchors.yaml"
@@ -3809,6 +3826,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ].update({"attribute.evidence_role": "'verifier'"}),
             ),
             (
+                "unbounded-subject",
+                lambda writer, writer_binding, verifier: writer["change"]["after"][
+                    "attribute_mapping"
+                ].update({"google.subject": "assertion.sub"}),
+            ),
+            (
                 "principal-role",
                 lambda writer, writer_binding, verifier: writer_binding["change"][
                     "after"
@@ -3872,6 +3895,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     ].replace("repository_visibility == 'private'", "repository_visibility != 'public'")
                 }
             ),
+            lambda provider, binding: provider["change"]["after"][
+                "attribute_mapping"
+            ].update({"google.subject": "assertion.sub"}),
             lambda provider, binding: binding["change"]["after"].update(
                 {"member": binding["change"]["after"]["member"].replace("production-apply", "production-plan")}
             ),
@@ -3938,8 +3964,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
                 "attribute_condition": " && ".join(
                     [
-                        "assertion.sub == 'repo:mindclade/platform-gitops:ref:refs/heads/main'",
-                        "assertion.repository == 'mindclade/platform-gitops'",
+                        "assertion.sub == 'repo:mindclade/gitops:ref:refs/heads/main'",
+                        "assertion.repository == 'mindclade/gitops'",
                         "assertion.ref == 'refs/heads/main'",
                     ]
                 ),
@@ -4013,6 +4039,50 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("resource-address allowlist", result.stderr)
 
+    def test_github_config_impersonation_is_provider_role_separated(self):
+        identity_project = self.project_resource("identity", "bootstrap-identity")
+        for identity in ("plan", "apply"):
+            with self.subTest(identity=identity):
+                binding = self.resource(
+                    "google_service_account_iam_member",
+                    ["create"],
+                    {
+                        "service_account_id": (
+                            "projects/bootstrap-identity/serviceAccounts/"
+                            f"github-config-{identity}@bootstrap-identity.iam.gserviceaccount.com"
+                        ),
+                        "role": "roles/iam.workloadIdentityUser",
+                        "member": (
+                            "principalSet://iam.googleapis.com/projects/123456789/"
+                            "locations/global/workloadIdentityPools/github-config/"
+                            f"attribute.github_config_identity/{identity}"
+                        ),
+                    },
+                )
+                binding["address"] = (
+                    "module.github_federation.google_service_account_iam_member."
+                    f'github_config["{identity}"]'
+                )
+                result = self.check_plan([identity_project, binding])
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+                opposite = "apply" if identity == "plan" else "plan"
+                binding["change"]["after"]["member"] = binding["change"]["after"][
+                    "member"
+                ].replace(f"/{identity}", f"/{opposite}")
+                result = self.check_plan([identity_project, binding])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("provider-owned github-config identity", result.stderr)
+
+                binding["change"]["after"]["member"] = (
+                    "principalSet://iam.googleapis.com/projects/123456789/"
+                    "locations/global/workloadIdentityPools/github-config/"
+                    "attribute.repository_id/1350986053"
+                )
+                result = self.check_plan([identity_project, binding])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("provider-owned github-config identity", result.stderr)
+
     def test_project_service_and_audit_destinations_follow_planned_projects(self):
         identity = self.project_resource("identity", "bootstrap-identity")
         service = self.resource(
@@ -4027,6 +4097,54 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         service["address"] = 'google_project_service.identity["iam.googleapis.com"]'
         result = self.check_plan([identity, service])
         self.assertEqual(result.returncode, 0, result.stderr)
+
+        for project_key, project_id, approved_services in (
+            (
+                "root_state",
+                "bootstrap-state-root",
+                ("iamcredentials.googleapis.com",),
+            ),
+            (
+                "recovery",
+                "bootstrap-recovery",
+                ("iamcredentials.googleapis.com", "sts.googleapis.com"),
+            ),
+        ):
+            for approved_service in approved_services:
+                with self.subTest(project_key=project_key, service=approved_service):
+                    project = self.project_resource(project_key, project_id)
+                    identity_service = self.resource(
+                        "google_project_service",
+                        ["create"],
+                        {
+                            "project": project_id,
+                            "service": approved_service,
+                            "disable_on_destroy": False,
+                        },
+                    )
+                    identity_service["address"] = (
+                        f'google_project_service.state["{project_key}:{approved_service}"]'
+                    )
+                    result = self.check_plan([project, identity_service])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+        root_sts = self.resource(
+            "google_project_service",
+            ["create"],
+            {
+                "project": "bootstrap-state-root",
+                "service": "sts.googleapis.com",
+                "disable_on_destroy": False,
+            },
+        )
+        root_sts["address"] = (
+            'google_project_service.state["root_state:sts.googleapis.com"]'
+        )
+        result = self.check_plan(
+            [self.project_resource("root_state", "bootstrap-state-root"), root_sts]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("resource-address allowlist", result.stderr)
 
         audit = self.project_resource("audit", "bootstrap-audit")
         recovery = self.project_resource("recovery", "bootstrap-recovery")
@@ -4450,6 +4568,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "us-central1",
                 "bootstrap-audit-primary",
             ),
+            "data-access": (
+                "bootstrap-data-access",
+                'log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"',
+                "bootstrap-audit",
+                "us-central1",
+                "bootstrap-audit-primary",
+            ),
             "admin-activity-recovery": (
                 "bootstrap-admin-activity-recovery",
                 'log_id("cloudaudit.googleapis.com/activity")',
@@ -4460,6 +4585,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "security-events-recovery": (
                 "bootstrap-security-events-recovery",
                 'severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"',
+                "bootstrap-recovery",
+                "us-east4",
+                "bootstrap-audit-recovery",
+            ),
+            "data-access-recovery": (
+                "bootstrap-data-access-recovery",
+                'log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"',
                 "bootstrap-recovery",
                 "us-east4",
                 "bootstrap-audit-recovery",
@@ -4555,7 +4687,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         )
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("both destination bucket sinks", result.stderr)
+        self.assertIn("all destination bucket sinks", result.stderr)
 
         sinks[1]["change"]["after"]["writer_identity"] = writer_identity
         different_organization_identity = (
@@ -4570,7 +4702,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         writers[1]["change"]["after"]["member"] = different_organization_identity
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("across all four sinks", result.stderr)
+        self.assertIn("across all six sinks", result.stderr)
 
     def test_audit_retention_lock_is_one_way_and_qualification_bound(self):
         project = self.project_resource("audit", "bootstrap-audit")

@@ -327,6 +327,16 @@ locals {
     "storagetransfer.googleapis.com",
   ])
 
+  workload_identity_project_services = {
+    root_state = toset([
+      "iamcredentials.googleapis.com",
+    ])
+    recovery = toset([
+      "iamcredentials.googleapis.com",
+      "sts.googleapis.com",
+    ])
+  }
+
   state_projects = {
     root_state = {
       id   = var.bootstrap.projects.root_state.id
@@ -338,13 +348,23 @@ locals {
     }
   }
 
-  state_project_services = {
+  state_project_services = merge({
     for binding in setproduct(keys(local.state_projects), local.state_services) :
     "${binding[0]}:${binding[1]}" => {
       project_key = binding[0]
       service     = binding[1]
     }
-  }
+    }, {
+    for binding in flatten([
+      for project_key, services in local.workload_identity_project_services : [
+        for service in services : {
+          key         = "${project_key}:${service}"
+          project_key = project_key
+          service     = service
+        }
+      ]
+    ]) : binding.key => binding
+  })
 
   plan_principal     = module.github_federation.principal_members["plan"]
   apply_principal    = module.github_federation.principal_members["apply"]
@@ -437,6 +457,7 @@ locals {
         "roles/iam.roleViewer",
         "roles/iam.securityReviewer",
         "roles/iam.serviceAccountViewer",
+        "roles/iam.workloadIdentityPoolViewer",
         "roles/privilegedaccessmanager.viewer",
         "roles/serviceusage.serviceUsageViewer",
         "roles/storagetransfer.viewer",

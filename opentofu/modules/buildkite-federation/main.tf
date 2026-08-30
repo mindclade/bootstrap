@@ -11,6 +11,7 @@ resource "google_iam_workload_identity_pool" "buildkite" {
   workload_identity_pool_id = var.pool_id
   display_name              = "bootstrap Buildkite"
   description               = "Isolated Buildkite OIDC trust for signed bootstrap handoff operations"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -24,6 +25,7 @@ resource "google_iam_workload_identity_pool_provider" "buildkite" {
   workload_identity_pool_provider_id = var.provider_id
   display_name                       = "bootstrap Buildkite"
   description                        = "Claim-restricted Buildkite provider"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {

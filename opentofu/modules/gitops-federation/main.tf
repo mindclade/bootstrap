@@ -11,6 +11,7 @@ resource "google_iam_workload_identity_pool" "gitops" {
   workload_identity_pool_id = var.pool_id
   display_name              = "bootstrap GitOps"
   description               = "Isolated GitOps OIDC trust for bootstrap handoff"
+  disabled                  = false
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -24,6 +25,7 @@ resource "google_iam_workload_identity_pool_provider" "gitops" {
   workload_identity_pool_provider_id = var.provider_id
   display_name                       = "bootstrap GitOps"
   description                        = "Claim-restricted GitOps controller provider"
+  disabled                           = false
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {

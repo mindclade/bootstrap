@@ -166,6 +166,13 @@ resource "google_kms_crypto_key_version" "signing" {
   }
 }
 
+data "google_kms_crypto_key_version" "active" {
+  for_each = var.keys
+
+  crypto_key = google_kms_crypto_key_version.signing["${each.key}:${each.value.active_version_ref}"].crypto_key
+  version    = tonumber(basename(google_kms_crypto_key_version.signing["${each.key}:${each.value.active_version_ref}"].name))
+}
+
 resource "google_kms_key_ring_iam_member" "administrator" {
   for_each = var.administrator_principals
 

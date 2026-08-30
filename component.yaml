@@ -41,5 +41,5 @@ spec:
     source_ready:
       description: Source, metadata, policy, tests, and required reviews are complete; no external mutation is implied.
     connected:
-      description: Requires external proof of exact-commit GitHub/GCP controls plus a generation-bound isolated restore and downstream reattachment; repository observation alone cannot qualify it.
+      description: Requires external proof of exact-commit GitHub/GCP controls, a generation-bound isolated restore and downstream reattachment, and Blueprint A3.8/A3.9 ratification of a reusable Ring-0 workflow interface or explicit protected-control-plane exception; repository observation alone cannot qualify it.
   license: Mindclade Proprietary License

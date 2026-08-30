@@ -213,9 +213,9 @@ variable "public_trust_metadata" {
   validation {
     condition = alltrue([
       for audience in values(var.public_trust_metadata.federation_audiences) :
-      startswith(audience, "https://") || startswith(audience, "//iam.googleapis.com/")
+      audience == "sts.googleapis.com" || startswith(audience, "https://") || startswith(audience, "//iam.googleapis.com/")
     ])
-    error_message = "Federation audiences must be HTTPS or canonical IAM audiences."
+    error_message = "Federation audiences must be sts.googleapis.com, HTTPS, or canonical IAM audiences."
   }
 
   validation {

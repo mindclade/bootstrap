@@ -12,6 +12,7 @@ resource "google_iam_workforce_pool" "workforce" {
   location          = "global"
   display_name      = "Mindclade workforce"
   description       = "Federated human authentication anchor; resource authorization is granted separately"
+  disabled          = false
   deletion_policy   = "PREVENT"
 
   lifecycle {
@@ -28,6 +29,7 @@ resource "google_iam_workforce_pool_provider" "oidc" {
   attribute_mapping      = var.attribute_mapping
   attribute_condition    = var.attribute_condition
   detailed_audit_logging = true
+  disabled               = false
   deletion_policy        = "PREVENT"
 
   oidc {

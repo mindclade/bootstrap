@@ -2434,14 +2434,22 @@ func (c *compiler) rootTrustVariables() map[string]any {
 	if !strings.HasPrefix(gitopsIssuer, "https://") {
 		c.problem("GitOps issuer must use HTTPS")
 	}
+	gitopsRepository := c.resolvedAt(federation, append(gitopsBase, "requiredClaims", "repository")...)
+	gitopsSubject := c.resolvedAt(federation, append(gitopsBase, "requiredClaims", "subject")...)
+	if gitopsRepository != "mindclade/gitops" {
+		c.problem("GitOps repository must equal the canonical mindclade/gitops repository")
+	}
+	if gitopsSubject != "repo:mindclade/gitops:ref:refs/heads/main" {
+		c.problem("GitOps immutable subject must equal repo:mindclade/gitops:ref:refs/heads/main")
+	}
 	gitops := map[string]any{
 		"pool_id":            c.stringAt(federation, append(gitopsBase, "poolId")...),
 		"provider_id":        c.stringAt(federation, append(gitopsBase, "providerId")...),
 		"service_account_id": c.stringAt(federation, append(gitopsBase, "serviceAccounts", "bootstrap", "accountId")...),
 		"issuer_uri":         gitopsIssuer,
 		"audience":           c.resolvedAt(federation, append(gitopsBase, "allowedAudience")...),
-		"subject":            c.resolvedAt(federation, append(gitopsBase, "requiredClaims", "subject")...),
-		"repository":         c.resolvedAt(federation, append(gitopsBase, "requiredClaims", "repository")...),
+		"subject":            gitopsSubject,
+		"repository":         gitopsRepository,
 		"ref":                c.stringAt(federation, append(gitopsBase, "requiredClaims", "ref", "literal")...),
 	}
 	if !uuidPattern.MatchString(buildkite["pipeline_id"].(string)) {
@@ -2625,7 +2633,7 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 		"buildkite":       context.Federation.Buildkite.Provider,
 		"gitops":          context.Federation.GitOps.Provider,
 	}
-	providerProjectNumbers := []string{}
+	providerProjectNumbers := map[string]string{}
 	for _, entry := range []struct {
 		name, value, pool, provider string
 	}{
@@ -2643,9 +2651,20 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 		if matches[2] != entry.pool || matches[3] != entry.provider {
 			c.problem("recovery context %s provider does not match the compiled pool/provider IDs", entry.name)
 		}
-		providerProjectNumbers = append(providerProjectNumbers, matches[1])
+		providerProjectNumbers[entry.name] = matches[1]
 	}
-	c.requireSingleValue("recovery context identity provider project numbers", providerProjectNumbers)
+	identityProviderProjectNumbers := []string{}
+	for _, name := range []string{"github-plan", "github-apply", "buildkite", "gitops"} {
+		if number := providerProjectNumbers[name]; number != "" {
+			identityProviderProjectNumbers = append(identityProviderProjectNumbers, number)
+		}
+	}
+	c.requireSingleValue("recovery context identity provider project numbers", identityProviderProjectNumbers)
+	recoveryProviderProjectNumber := providerProjectNumbers["github-recovery"]
+	if len(identityProviderProjectNumbers) > 0 && recoveryProviderProjectNumber != "" &&
+		identityProviderProjectNumbers[0] == recoveryProviderProjectNumber {
+		c.problem("recovery context GitHub recovery provider must use a distinct recovery-project number from identity providers")
+	}
 
 	expectedSigningKeys := sortedKeys(c.objectAt(signing, "spec", "keys"))
 	actualSigningKeys := sortedKeys(context.SigningRoots)
@@ -2654,6 +2673,11 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 	}
 	signingVersions := map[string]string{}
 	signingWindows := map[string]any{}
+	recoverySigningWindowKeys := map[string]struct{}{
+		"audit-anchor":      {},
+		"bootstrap-handoff": {},
+		"recovery-evidence": {},
+	}
 	for _, name := range expectedSigningKeys {
 		version := context.SigningRoots[name].PrimaryVersion
 		matches := keyVersionPattern.FindStringSubmatch(version)
@@ -2664,6 +2688,9 @@ func (c *compiler) recoveryVariables(context recoveryContext) map[string]any {
 			c.problem("recovery context signing root %s does not match the compiled signing root", name)
 		}
 		signingVersions[name] = version
+		if _, published := recoverySigningWindowKeys[name]; !published {
+			continue
+		}
 		activeVersionRef := c.stringAt(signing, "spec", "keys", name, "activeVersionRef")
 		signingWindows[name] = map[string]any{
 			"active_version_ref":      activeVersionRef,

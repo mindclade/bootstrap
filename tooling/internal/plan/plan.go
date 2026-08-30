@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -148,6 +149,7 @@ var approvedResourceAddressFamilies = map[string]bool{
 	"managed|google_kms_key_ring|module.signing_root.google_kms_key_ring.signing":                                     true,
 	"managed|google_kms_crypto_key|module.signing_root.google_kms_crypto_key.signing":                                 true,
 	"managed|google_kms_crypto_key_version|module.signing_root.google_kms_crypto_key_version.signing":                 true,
+	"data|google_kms_crypto_key_version|module.signing_root.data.google_kms_crypto_key_version.active":                true,
 	"managed|google_kms_key_ring_iam_member|module.signing_root.google_kms_key_ring_iam_member.administrator":         true,
 	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.signer":            true,
 	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.recovery_metadata": true,
@@ -225,6 +227,7 @@ var exactResourceAddressKeys = map[string]map[string]bool{
 	"module.audit_root.google_project_iam_member.plan_read":                                      stringSet("primary", "recovery"),
 	"module.signing_root.google_project_service.required":                                        stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "serviceusage.googleapis.com"),
 	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
+	"module.signing_root.data.google_kms_crypto_key_version.active":                              stringSet("audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
 	"module.recovery_exports.google_kms_crypto_key.recovery":                                     stringSet("exports", "evidence"),
 	"module.recovery_exports.google_kms_crypto_key_iam_member.storage":                           stringSet("exports", "evidence"),
 	"module.recovery_exports.google_storage_bucket.recovery":                                     stringSet("exports", "evidence"),
@@ -314,6 +317,14 @@ func addRootTrustAddressKeys() {
 			stateProjectServiceKeys = append(stateProjectServiceKeys, project+":"+service)
 		}
 	}
+	for project, services := range map[string][]string{
+		"root_state": {"iamcredentials.googleapis.com"},
+		"recovery":   {"iamcredentials.googleapis.com", "sts.googleapis.com"},
+	} {
+		for _, service := range services {
+			stateProjectServiceKeys = append(stateProjectServiceKeys, project+":"+service)
+		}
+	}
 	exactResourceAddressKeys["google_project_service.state"] = stringSet(stateProjectServiceKeys...)
 
 	administrationRoles := map[string][]string{
@@ -331,7 +342,7 @@ func addRootTrustAddressKeys() {
 	readRoles := map[string][]string{
 		"identity": {"roles/browser", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/iam.workloadIdentityPoolViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer"},
 		"state":    {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer", "roles/storagetransfer.viewer"},
-		"recovery": {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer", "roles/storagetransfer.viewer"},
+		"recovery": {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/iam.workloadIdentityPoolViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer", "roles/storagetransfer.viewer"},
 		"audit":    {"roles/browser", "roles/cloudkms.viewer", "roles/iam.securityReviewer", "roles/serviceusage.serviceUsageViewer"},
 		"signing":  {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer"},
 	}
@@ -554,6 +565,8 @@ var recoveryStateExportRoleContracts = map[string]replicationRoleContract{
 var recoveryStateExportKeys = []string{"root-trust", "recovery-plane"}
 
 var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"}
+
+var recoverySigningWindowNames = []string{"audit-anchor", "bootstrap-handoff", "recovery-evidence"}
 
 var replicationPrefixes = map[string]string{
 	"module.root_state":     "root-trust/default.tfstate",
@@ -1141,8 +1154,8 @@ func validateAuditSinkWriterGraph(resources []resourceChange, violations *[]stri
 	const sinkBase = "module.audit_root.google_logging_organization_sink.audit"
 	const writerBase = "module.audit_root.google_project_iam_member.sink_writer"
 	pairedSinks := map[string][]string{
-		"primary":  {"admin-activity", "security-events"},
-		"recovery": {"admin-activity-recovery", "security-events-recovery"},
+		"primary":  {"admin-activity", "data-access", "security-events"},
+		"recovery": {"admin-activity-recovery", "data-access-recovery", "security-events-recovery"},
 	}
 	sharedExpectedIdentity := ""
 	for bucketKey, sinkKeys := range pairedSinks {
@@ -1181,7 +1194,7 @@ func validateAuditSinkWriterGraph(resources []resourceChange, violations *[]stri
 		}
 		if !validOrganizationParent || expectedIdentity == "" ||
 			(sharedExpectedIdentity != "" && expectedIdentity != sharedExpectedIdentity) {
-			*violations = append(*violations, indexedResourceAddress(writerBase, bucketKey)+" must use the one shared Logging service agent for the exact organization across all four sinks")
+			*violations = append(*violations, indexedResourceAddress(writerBase, bucketKey)+" must use the one shared Logging service agent for the exact organization across all six sinks")
 			continue
 		}
 		sharedExpectedIdentity = expectedIdentity
@@ -1190,12 +1203,12 @@ func validateAuditSinkWriterGraph(resources []resourceChange, violations *[]stri
 			continue
 		}
 		// On the first create, the provider assigns writer_identity. The exact
-		// four sink keys and two bucket-scoped grants bind the generated IAM
+		// six sink keys and two bucket-scoped grants bind the generated IAM
 		// member; this exception is not accepted on updates or no-ops.
 		if allInitialCreateUnknown {
 			continue
 		}
-		*violations = append(*violations, indexedResourceAddress(writerBase, bucketKey)+" member must exactly equal both destination bucket sinks' planned writer_identity")
+		*violations = append(*violations, indexedResourceAddress(writerBase, bucketKey)+" member must exactly equal all destination bucket sinks' planned writer_identity")
 	}
 }
 
@@ -1371,7 +1384,7 @@ func exactSigningVersionInventory(resources []resourceChange, contract *signingC
 	want := contract.versions
 	got := map[string]bool{}
 	for _, resource := range resources {
-		if resource.Type != "google_kms_crypto_key_version" {
+		if resource.Mode != "managed" || resource.Type != "google_kms_crypto_key_version" {
 			continue
 		}
 		actions := strings.Join(resource.Change.Actions, ",")
@@ -1842,7 +1855,7 @@ func validateSigningPrincipalCoverage(allResources, resources []resourceChange, 
 	}
 	buildkiteMember := ""
 	for _, resource := range allResources {
-		if resource.Address != "module.buildkite_federation.google_service_account_iam_member.buildkite" {
+		if resource.Address != "module.buildkite_federation.google_service_account.buildkite" {
 			continue
 		}
 		after, _ := resource.Change.After.(map[string]any)
@@ -2010,8 +2023,17 @@ func validateCompiledAuditGraph(resources []resourceChange, bootstrap map[string
 		}
 		after := resourceAfter(resources, indexedResourceAddress("module.audit_root.google_logging_organization_sink.audit", sinkKey))
 		expectedDestination := fmt.Sprintf("logging.googleapis.com/projects/%s/locations/%s/buckets/%s", projects[logical], stringValue(bucket["location"]), stringValue(bucket["bucket_id"]))
+		resource := resourceByAddress(resources, indexedResourceAddress("module.audit_root.google_logging_organization_sink.audit", sinkKey))
+		destinationMatches := after != nil && after["destination"] == expectedDestination
+		if resource != nil && strings.Join(resource.Change.Actions, ",") == "create" &&
+			plannedUnset(after["destination"]) && topLevelUnknown(resource.Change.AfterUnknown, "destination") {
+			// The provider computes this exact protected-bucket reference only
+			// on initial create; the sink invariant also constrains its region
+			// and bucket ID.
+			destinationMatches = true
+		}
 		if after == nil || after["name"] != declaration["name"] || after["filter"] != declaration["filter"] ||
-			after["org_id"] != organizationID || after["destination"] != expectedDestination {
+			after["org_id"] != organizationID || !destinationMatches {
 			*violations = append(*violations, "audit sink "+sinkKey+" must exactly equal its compiled organization, filter, and protected bucket destination")
 		}
 	}
@@ -2055,7 +2077,7 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		}
 		environment := map[string]string{"plan": "trusted-build", "apply": "infrastructure-apply", "recovery": "infrastructure-apply"}[instance]
 		validateCompiledBootstrapProvider(providerAddress, provider, github, poolProject, poolID, providerID,
-			stringValue(audiences[instance]), environment, stringValue(workflowRefs[instance]), violations)
+			stringValue(audiences[instance]), environment, stringValue(workflowRefs[instance]), instance, violations)
 		validateCompiledFederationBinding(bindingAddress, binding, pool, accountID, serviceProject, "repository_id", stringValue(github["repository_id"]), violations)
 	}
 	validateCompiledFederationActivation(bootstrap, violations)
@@ -2149,10 +2171,9 @@ func validateCompiledGithubConfigGraph(resources []resourceChange, bootstrap map
 	}
 }
 
-func validateCompiledBootstrapProvider(address string, provider, github map[string]any, project, poolID, providerID, audience, environment, workflowRef string, violations *[]string) {
+func validateCompiledBootstrapProvider(address string, provider, github map[string]any, project, poolID, providerID, audience, environment, workflowRef, instance string, violations *[]string) {
 	expectedMapping := map[string]string{
-		"google.subject":                  "assertion.sub",
-		"attribute.repo":                  "assertion.repo",
+		"google.subject":                  githubRepositorySubjectMapping("bootstrap-" + instance),
 		"attribute.repository_id":         "assertion.repository_id",
 		"attribute.repository_owner_id":   "assertion.repository_owner_id",
 		"attribute.ref":                   "assertion.ref",
@@ -2180,8 +2201,7 @@ func bootstrapProviderCondition(github map[string]any, environment, workflowRef 
 		immutableRepository = fmt.Sprintf("%s@%s/%s@%s", repositoryParts[0], stringValue(github["repository_owner_id"]), repositoryParts[1], stringValue(github["repository_id"]))
 	}
 	return strings.Join([]string{
-		fmt.Sprintf("assertion.sub == 'repo:%s:context:environment%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
-		fmt.Sprintf("assertion.repo == '%s'", immutableRepository),
+		fmt.Sprintf("assertion.sub == 'repo:%s:environment:%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
 		fmt.Sprintf("assertion.repository == '%s'", repository),
 		"assertion.repository_owner == 'mindclade'",
 		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(github["repository_id"])),
@@ -2231,8 +2251,6 @@ func validateCompiledInfrastructureFederationGraph(resources []resourceChange, b
 		*violations = append(*violations, poolAddress+" must exactly equal the compiled identity project and infrastructure-live pool ID")
 	}
 	expectedMapping := map[string]string{
-		"google.subject":                "assertion.sub",
-		"attribute.repo":                "assertion.repo",
 		"attribute.repository_id":       "assertion.repository_id",
 		"attribute.repository_owner_id": "assertion.repository_owner_id",
 		"attribute.workflow_ref":        "assertion.workflow_ref",
@@ -2256,6 +2274,7 @@ func validateCompiledInfrastructureFederationGraph(resources []resourceChange, b
 		for key, value := range expectedMapping {
 			mapping[key] = value
 		}
+		mapping["google.subject"] = githubRepositorySubjectMapping("infrastructure-live-" + identityKey)
 		mapping["attribute.infrastructure_identity"] = "'" + identityKey + "'"
 		oidc, _ := singleObject(provider["oidc"])
 		expectedCondition := infrastructureProviderCondition(declaration, environment)
@@ -2280,8 +2299,7 @@ func infrastructureProviderCondition(declaration map[string]any, environment str
 	immutableRepository := stringValue(declaration["immutable_repository"])
 	workflowRef := stringValue(declaration["workflow_ref"])
 	return strings.Join([]string{
-		fmt.Sprintf("assertion.sub == 'repo:%s:context:environment%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
-		fmt.Sprintf("assertion.repo == '%s'", immutableRepository),
+		fmt.Sprintf("assertion.sub == 'repo:%s:environment:%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", immutableRepository, environment, workflowRef),
 		fmt.Sprintf("assertion.repository == '%s'", stringValue(declaration["repository_full_name"])),
 		"assertion.repository_owner == 'mindclade'",
 		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(declaration["repository_owner_id"])),
@@ -2547,10 +2565,15 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 	for _, keyName := range signingKeyNames {
 		key, _ := keys[keyName].(map[string]any)
 		expected := stringSetFromValue(key["signer_principals"])
-		if keyName == "audit-anchor" || keyName == "bootstrap-handoff" {
+		switch keyName {
+		case "audit-anchor", "bootstrap-handoff":
 			expected[principals.buildkite] = true
-		} else {
+		case "recovery-evidence":
 			expected[principals.recovery] = true
+		case "infrastructure-export":
+			// The source declares its future signers, while this key stays
+			// IAM-disabled until connected infrastructure qualification.
+			expected = map[string]bool{}
 		}
 		if !sameStringSet(actualSigners[keyName], expected) {
 			*violations = append(*violations, "signer bindings for "+keyName+" must exactly equal the compiled signers plus its approved pipeline/recovery identity")
@@ -2658,6 +2681,10 @@ func validatePlannedProjectGraph(resources []resourceChange, violations *[]strin
 		case "google_kms_crypto_key_iam_member":
 			if resource.Address == "module.signing_root.google_kms_crypto_key_iam_member.recovery_metadata" {
 				if resource.initialSigningCreateProof && exactInitialRecoveryMetadataEnvelope(resource, after) {
+					roleProject, _, _ := splitCustomRole(stringValue(after["role"]))
+					if projects["signing"] != "" && roleProject != projects["signing"] {
+						*violations = append(*violations, resource.Address+" must target the planned signing project")
+					}
 					continue
 				}
 				cryptoKey, _ := after["crypto_key_id"].(string)
@@ -2697,7 +2724,7 @@ func validateStateBackendProject(resource resourceChange, after map[string]any, 
 		base = base[:index]
 	}
 	instance, _, _ := terraformAddressStringIndex(resource.Address, base)
-	if strings.Contains(base, ".replica") || strings.Contains(base, "replica_service_agent") || instance == "replica" || strings.HasPrefix(instance, "replica-") {
+	if stateBackendReplicaScoped(base, instance) {
 		logical = replicaLogical
 	}
 	if projects[logical] == "" {
@@ -2718,12 +2745,33 @@ func validateStateBackendProject(resource resourceChange, after map[string]any, 
 		role, _ := after["role"].(string)
 		if strings.HasPrefix(role, "projects/") {
 			roleProject, _, ok := splitCustomRole(role)
-			if !ok || roleProject != projects[primaryLogical] {
-				*violations = append(*violations, resource.Address+" custom role must belong to the planned source state project")
+			expectedLogical := primaryLogical
+			if base == module+".google_storage_bucket_iam_member.replication" && instance == "destination" {
+				expectedLogical = replicaLogical
+			}
+			if !ok || roleProject != projects[expectedLogical] {
+				*violations = append(*violations, resource.Address+" custom role must belong to its planned state project")
 			}
 		}
 	}
-	_ = module
+}
+
+func stateBackendReplicaScoped(base, instance string) bool {
+	suffix := strings.TrimPrefix(base, "module.root_state.")
+	suffix = strings.TrimPrefix(suffix, "module.recovery_state.")
+	switch suffix {
+	case "google_kms_key_ring.replica", "google_kms_crypto_key.replica", "google_kms_crypto_key_iam_member.replica_service_agent":
+		return true
+	case "google_project_iam_custom_role.replication":
+		return instance == "destination_bucket"
+	case "data.google_storage_project_service_account.replica":
+		return true
+	case "google_storage_bucket.state":
+		return instance == "replica"
+	case "google_storage_bucket_iam_member.backend_access":
+		return strings.HasPrefix(instance, "replica-")
+	}
+	return false
 }
 
 func validateKMSProject(resource resourceChange, after map[string]any, projects map[string]string, violations *[]string) {
@@ -3018,7 +3066,8 @@ func validDynamicAddressIndex(kind, index string) bool {
 		return len(parts) == 2 && googleProjectIDPattern.MatchString(parts[0]) && explicitPrincipal(parts[1])
 	case "audit-bucket-principal":
 		parts := strings.SplitN(index, ":", 2)
-		return len(parts) == 2 && (parts[0] == "primary" || parts[0] == "recovery") && groupEmailPrincipalPattern.MatchString(parts[1])
+		return len(parts) == 2 && (parts[0] == "primary" || parts[0] == "recovery") &&
+			(groupEmailPrincipalPattern.MatchString(parts[1]) || bootstrapRecoveryPrincipalPattern.MatchString(parts[1]))
 	case "role-principal":
 		parts := strings.SplitN(index, ":", 2)
 		return len(parts) == 2 && parts[0] == "roles/logging.configWriter" && explicitPrincipal(parts[1])
@@ -3172,7 +3221,11 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 		requireEqual(after, "destroy_scheduled_duration", "2592000s", resource.Address, violations)
 		validateSigningCryptoKey(resource, after, violations)
 	case "google_kms_crypto_key_version":
-		validateSigningCryptoKeyVersion(resource, after, violations)
+		if resource.Mode == "managed" {
+			validateSigningCryptoKeyVersion(resource, after, violations)
+		} else {
+			validateActiveSigningVersionData(resource, after, violations)
+		}
 	case "google_iam_workload_identity_pool_provider", "google_iam_workforce_pool_provider":
 		requireEqual(after, "disabled", false, resource.Address, violations)
 		condition, _ := after["attribute_condition"].(string)
@@ -3382,7 +3435,7 @@ func validateStorageBucketContract(resource resourceChange, after map[string]any
 
 func validateStateBucketLifecycle(resource resourceChange, after map[string]any, violations *[]string) {
 	rules, rulesOK := after["lifecycle_rule"].([]any)
-	if !rulesOK || len(rules) != 1 || nestedUnknown(resource.Change.AfterUnknown, "lifecycle_rule") {
+	if !rulesOK || len(rules) != 1 || !approvedStateBucketLifecycleUnknowns(resource) {
 		*violations = append(*violations, resource.Address+" must configure exactly one explicit noncurrent-generation Delete lifecycle rule")
 		return
 	}
@@ -3395,6 +3448,33 @@ func validateStateBucketLifecycle(resource resourceChange, after map[string]any,
 		condition["send_age_if_zero"] != false {
 		*violations = append(*violations, resource.Address+" lifecycle must delete only noncurrent generations after 365 days while preserving the three newest generations")
 	}
+}
+
+func approvedStateBucketLifecycleUnknowns(resource resourceChange) bool {
+	unknown := firstObject(resource.Change.AfterUnknown)
+	if !containsUnknown(unknown["lifecycle_rule"]) {
+		return true
+	}
+	rules, ok := unknown["lifecycle_rule"].([]any)
+	if !ok || len(rules) != 1 {
+		return false
+	}
+	rule, ok := rules[0].(map[string]any)
+	if !ok || len(rule) != 2 {
+		return false
+	}
+	action, actionOK := singleObject(rule["action"])
+	condition, conditionOK := singleObject(rule["condition"])
+	if !actionOK || len(action) != 0 || !conditionOK || len(condition) != 4 || condition["with_state"] != true {
+		return false
+	}
+	for _, key := range []string{"matches_prefix", "matches_storage_class", "matches_suffix"} {
+		values, valuesOK := condition[key].([]any)
+		if !valuesOK || len(values) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func validBucketName(name string) bool {
@@ -3578,7 +3658,7 @@ func validateCIEvidenceProviderClaims(resource resourceChange, after map[string]
 	base := "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence"
 	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
 	commonMapping := map[string]string{
-		"google.subject":                  "assertion.sub",
+		"google.subject":                  githubRepositorySubjectMapping("ci-evidence-" + instance),
 		"attribute.evidence_role":         "'" + instance + "'",
 		"attribute.repository_id":         "assertion.repository_id",
 		"attribute.repository_owner_id":   "assertion.repository_owner_id",
@@ -3617,16 +3697,15 @@ func validateGithubConfigProviderClaims(resource resourceChange, after map[strin
 	base := "module.github_federation.google_iam_workload_identity_pool_provider.github_config"
 	instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
 	expectedMapping := map[string]string{
-		"google.subject":                  "assertion.sub",
-		"attribute.repo":                  "assertion.repo",
-		"attribute.repository_id":         "assertion.repository_id",
-		"attribute.repository_owner_id":   "assertion.repository_owner_id",
-		"attribute.ref":                   "assertion.ref",
-		"attribute.workflow_ref":          "assertion.workflow_ref",
-		"attribute.workflow_sha":          "assertion.workflow_sha",
-		"attribute.environment":           "assertion.environment",
-		"attribute.repository_visibility": "assertion.repository_visibility",
-		"attribute.runner_environment":    "assertion.runner_environment",
+		"google.subject":                   githubRepositorySubjectMapping("github-config-" + instance),
+		"attribute.github_config_identity": "'" + instance + "'",
+		"attribute.repository_id":          "assertion.repository_id",
+		"attribute.repository_owner_id":    "assertion.repository_owner_id",
+		"attribute.ref":                    "assertion.ref",
+		"attribute.workflow_ref":           "assertion.workflow_ref",
+		"attribute.workflow_sha":           "assertion.workflow_sha",
+		"attribute.repository_visibility":  "assertion.repository_visibility",
+		"attribute.runner_environment":     "assertion.runner_environment",
 	}
 	oidc := firstObject(after["oidc"])
 	if !indexed || !stringSet("plan", "apply")[instance] || !exactStringMap(after["attribute_mapping"], expectedMapping) ||
@@ -3638,7 +3717,6 @@ func validateGithubConfigProviderClaims(resource resourceChange, after map[strin
 
 func githubConfigProviderCondition(instance string) string {
 	base := []string{
-		"assertion.repo == 'mindclade@316676129/github-config@1350986053'",
 		"assertion.repository == 'mindclade/github-config'",
 		"assertion.repository_owner == 'mindclade'",
 		"assertion.repository_owner_id == '316676129'",
@@ -3649,7 +3727,7 @@ func githubConfigProviderCondition(instance string) string {
 	subject := func(workflowRef, contextType, contextValue string) string {
 		contextPredicate := fmt.Sprintf("assertion.%s == '%s'", contextType, contextValue)
 		return "(" + strings.Join([]string{
-			fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/github-config@1350986053:context:%s%%3A%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", contextType, contextValue, workflowRef),
+			fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/github-config@1350986053:%s:%s:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", contextType, contextValue, workflowRef),
 			fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
 			"assertion.workflow_sha == assertion.sha",
 			contextPredicate,
@@ -3669,9 +3747,8 @@ func githubConfigProviderCondition(instance string) string {
 
 func validateInfrastructureDriftProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
 	expectedMapping := map[string]string{
-		"google.subject":                    "assertion.sub",
+		"google.subject":                    githubRepositorySubjectMapping("infrastructure-live-drift-plan"),
 		"attribute.infrastructure_identity": "'drift-plan'",
-		"attribute.repo":                    "assertion.repo",
 		"attribute.repository_id":           "assertion.repository_id",
 		"attribute.repository_owner_id":     "assertion.repository_owner_id",
 		"attribute.workflow_ref":            "assertion.workflow_ref",
@@ -3689,8 +3766,7 @@ func validateInfrastructureDriftProviderClaims(resource resourceChange, after ma
 func infrastructureDriftProviderCondition() string {
 	workflowRef := "mindclade/infrastructure-live/.github/workflows/drift-detection.yml@refs/heads/main"
 	return strings.Join([]string{
-		fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/infrastructure-live@1350992171:context:environment%%3Atrusted-build:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", workflowRef),
-		"assertion.repo == 'mindclade@316676129/infrastructure-live@1350992171'",
+		fmt.Sprintf("assertion.sub == 'repo:mindclade@316676129/infrastructure-live@1350992171:environment:trusted-build:workflow_ref:%s:workflow_sha:' + assertion.workflow_sha", workflowRef),
 		"assertion.repository == 'mindclade/infrastructure-live'",
 		"assertion.repository_owner == 'mindclade'",
 		"assertion.repository_owner_id == '316676129'",
@@ -3726,9 +3802,8 @@ func validateInfrastructureProviderClaims(resource resourceChange, after map[str
 		"workflow_ref":         "mindclade/infrastructure-live/.github/workflows/protected-apply.yml@refs/heads/main",
 	}
 	expectedMapping := map[string]string{
-		"google.subject":                    "assertion.sub",
+		"google.subject":                    githubRepositorySubjectMapping("infrastructure-live-" + instance),
 		"attribute.infrastructure_identity": "'" + instance + "'",
-		"attribute.repo":                    "assertion.repo",
 		"attribute.repository_id":           "assertion.repository_id",
 		"attribute.repository_owner_id":     "assertion.repository_owner_id",
 		"attribute.workflow_ref":            "assertion.workflow_ref",
@@ -3805,8 +3880,7 @@ func validateBootstrapProviderClaims(resource resourceChange, after map[string]a
 		"branch_ref":           "refs/heads/main",
 	}
 	expectedMapping := map[string]string{
-		"google.subject":                  "assertion.sub",
-		"attribute.repo":                  "assertion.repo",
+		"google.subject":                  githubRepositorySubjectMapping("bootstrap-" + instance),
 		"attribute.repository_id":         "assertion.repository_id",
 		"attribute.repository_owner_id":   "assertion.repository_owner_id",
 		"attribute.ref":                   "assertion.ref",
@@ -3823,6 +3897,10 @@ func validateBootstrapProviderClaims(resource resourceChange, after map[string]a
 		!exactStringSet(oidc["allowed_audiences"], []string{"sts.googleapis.com"}) {
 		*violations = append(*violations, resource.Address+" must bind the exact immutable bootstrap custom subject, source SHA, protected workflow/environment, self-hosted runner, and organization-approved audience")
 	}
+}
+
+func githubRepositorySubjectMapping(role string) string {
+	return "'" + role + ":' + assertion.repository_id"
 }
 
 func validateWorkforceProviderClaims(resource resourceChange, after map[string]any, violations *[]string) {
@@ -3961,9 +4039,9 @@ func validateFederationClaimGraph(resources []resourceChange, violations *[]stri
 			if member == "" && topLevelUnknown(resource.Change.AfterUnknown, "member") {
 				continue
 			}
-			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/github-config/attribute\.repository_id/1350986053$`)
+			pattern := regexp.MustCompile(`^principalSet://iam\.googleapis\.com/projects/[0-9]+/locations/global/workloadIdentityPools/github-config/attribute\.github_config_identity/` + regexp.QuoteMeta(instance) + `$`)
 			if !pattern.MatchString(member) {
-				*violations = append(*violations, resource.Address+" principalSet must bind only the exact github-config repository ID")
+				*violations = append(*violations, resource.Address+" principalSet must bind only its provider-owned github-config identity")
 			}
 			continue
 		case "module.github_federation.google_service_account_iam_member.infrastructure_live":
@@ -4025,7 +4103,7 @@ func validateWorkforceSecretRevision(resource resourceChange, after map[string]a
 		return
 	}
 	revision, ok := workforceSecretRevision(after)
-	if !ok || revision < 1 || revision != float64(int64(revision)) {
+	if !ok || revision < 1 {
 		*violations = append(*violations, resource.Address+" must declare a positive integer write-only client-secret revision")
 		return
 	}
@@ -4039,7 +4117,7 @@ func validateWorkforceSecretRevision(resource resourceChange, after map[string]a
 	}
 }
 
-func workforceSecretRevision(value map[string]any) (float64, bool) {
+func workforceSecretRevision(value map[string]any) (uint64, bool) {
 	oidc, ok := singleObject(value["oidc"])
 	if !ok {
 		return 0, false
@@ -4052,8 +4130,21 @@ func workforceSecretRevision(value map[string]any) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	revision, ok := secretValue["plain_text_wo_version"].(float64)
-	return revision, ok
+	switch revision := secretValue["plain_text_wo_version"].(type) {
+	case string:
+		if !regexp.MustCompile(`^[1-9][0-9]*$`).MatchString(revision) {
+			return 0, false
+		}
+		parsed, err := strconv.ParseUint(revision, 10, 64)
+		return parsed, err == nil
+	case float64:
+		if revision < 1 || revision != float64(uint64(revision)) {
+			return 0, false
+		}
+		return uint64(revision), true
+	default:
+		return 0, false
+	}
 }
 
 func validateAuditLogBucket(resource resourceChange, after map[string]any, violations *[]string) {
@@ -4134,18 +4225,22 @@ func validateAuditOrganizationSink(resource resourceChange, after map[string]any
 	contracts := map[string]sinkContract{
 		"admin-activity":           {name: "bootstrap-admin-activity", filter: `log_id("cloudaudit.googleapis.com/activity")`, location: "us-central1"},
 		"admin-activity-recovery":  {name: "bootstrap-admin-activity-recovery", filter: `log_id("cloudaudit.googleapis.com/activity")`, location: "us-east4"},
+		"data-access":              {name: "bootstrap-data-access", filter: `log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"`, location: "us-central1"},
+		"data-access-recovery":     {name: "bootstrap-data-access-recovery", filter: `log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.serviceName="storage.googleapis.com"`, location: "us-east4"},
 		"security-events":          {name: "bootstrap-security-events", filter: `severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"`, location: "us-central1"},
 		"security-events-recovery": {name: "bootstrap-security-events-recovery", filter: `severity>=WARNING OR protoPayload.serviceName="iam.googleapis.com"`, location: "us-east4"},
 	}
 	bucketIDs := map[string]string{
 		"admin-activity":           "bootstrap-audit-primary",
 		"admin-activity-recovery":  "bootstrap-audit-recovery",
+		"data-access":              "bootstrap-audit-primary",
+		"data-access-recovery":     "bootstrap-audit-recovery",
 		"security-events":          "bootstrap-audit-primary",
 		"security-events-recovery": "bootstrap-audit-recovery",
 	}
 	contract, ok := contracts[instance]
 	if !indexed || !ok {
-		*violations = append(*violations, resource.Address+" is outside the four exact organization audit sinks")
+		*violations = append(*violations, resource.Address+" is outside the six exact organization audit sinks")
 		return
 	}
 	requireEqual(after, "name", contract.name, resource.Address, violations)
@@ -4452,9 +4547,10 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 		condition, conditionOK := singleObject(after["condition"])
 		expectedTitle := "bootstrap-audit-" + bucketKey + "-all-logs-view"
 		expectedExpression := fmt.Sprintf("resource.name == 'projects/%s/locations/%s/buckets/%s/views/_AllLogs'", project, location, bucketID)
-		if !indexed || len(parts) != 2 || member != parts[1] || !groupEmailPrincipalPattern.MatchString(member) || role != "roles/logging.viewAccessor" ||
+		validReaderPrincipal := groupEmailPrincipalPattern.MatchString(member) || bootstrapRecoveryPrincipalPattern.MatchString(member)
+		if !indexed || len(parts) != 2 || member != parts[1] || !validReaderPrincipal || role != "roles/logging.viewAccessor" ||
 			location == "" || !conditionOK || nestedUnknown(resource.Change.AfterUnknown, "condition") || condition["title"] != expectedTitle || condition["expression"] != expectedExpression {
-			*violations = append(*violations, resource.Address+" reader must bind one canonical group to only its exact audit-bucket _AllLogs view")
+			*violations = append(*violations, resource.Address+" reader must bind one canonical group or the exact recovery identity to only its exact audit-bucket _AllLogs view")
 		}
 	case "module.audit_root.google_project_iam_member.administrator":
 		parts := strings.SplitN(instance, ":", 2)
@@ -4494,7 +4590,7 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 	case "module.github_federation.google_service_account_iam_member.ci_evidence":
 		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.evidence_role", violations)
 	case "module.github_federation.google_service_account_iam_member.github_config":
-		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.repository_id", violations)
+		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.github_config_identity", violations)
 	case "module.github_federation.google_service_account_iam_member.infrastructure_live":
 		validateFederationServiceAccountBinding(resource, after, instance, indexed, "attribute.infrastructure_identity", violations)
 	case "module.github_federation.google_service_account_iam_member.infrastructure_drift":
@@ -4629,11 +4725,14 @@ func exactInitialSignerIAMEnvelope(resource resourceChange, after map[string]any
 
 func exactInitialRecoveryMetadataEnvelope(resource resourceChange, after map[string]any) bool {
 	condition, ok := singleObject(after["condition"])
-	return len(after) == 2 && ok && len(condition) == 2 &&
+	roleProject, roleID, roleOK := splitCustomRole(stringValue(after["role"]))
+	return len(after) == 3 && ok && len(condition) == 2 &&
+		bootstrapRecoveryPrincipalPattern.MatchString(stringValue(after["member"])) &&
+		roleOK && googleProjectIDPattern.MatchString(roleProject) && roleID == recoverySigningMetadataRoleContract.roleID &&
 		condition["description"] == "Permit connected verification to inspect only the recovery-evidence key and its source-selected active version." &&
 		condition["title"] == "read-recovery-evidence-active-key-version-only" && plannedUnset(condition["expression"]) &&
 		exactUnknownLeafSet(resource.Change.AfterUnknown, []string{
-			"condition[0].expression", "crypto_key_id", "etag", "id", "role",
+			"condition[0].expression", "crypto_key_id", "etag", "id",
 		})
 }
 
@@ -4720,6 +4819,70 @@ func approvedUnknownBucketCMEK(resource resourceChange) bool {
 	return resource.Type == "google_storage_bucket" && (base == "module.root_state.google_storage_bucket.state" ||
 		base == "module.recovery_state.google_storage_bucket.state" ||
 		base == "module.recovery_exports.google_storage_bucket.recovery")
+}
+
+func approvedStateBucketEncryptionUnknowns(resource resourceChange) bool {
+	if !approvedUnknownBucketCMEK(resource) {
+		return false
+	}
+	encryption, ok := singleObject(firstObject(resource.Change.AfterUnknown)["encryption"])
+	if !ok || encryption["default_kms_key_name"] != true {
+		return false
+	}
+	if len(encryption) == 1 {
+		return true
+	}
+	if len(encryption) != 4 {
+		return false
+	}
+	for _, key := range []string{
+		"customer_managed_encryption_enforcement_config",
+		"customer_supplied_encryption_enforcement_config",
+		"google_managed_encryption_enforcement_config",
+	} {
+		values, valuesOK := encryption[key].([]any)
+		if !valuesOK || len(values) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func approvedStateBucketSoftDeleteUnknowns(resource resourceChange) bool {
+	base := resourceAddressBase(resource.Address)
+	if resource.Mode != "managed" || resource.Type != "google_storage_bucket" ||
+		(base != "module.root_state.google_storage_bucket.state" && base != "module.recovery_state.google_storage_bucket.state") {
+		return false
+	}
+	after, _ := resource.Change.After.(map[string]any)
+	policy, policyOK := singleObject(after["soft_delete_policy"])
+	unknownPolicy, unknownOK := singleObject(firstObject(resource.Change.AfterUnknown)["soft_delete_policy"])
+	return policyOK && len(policy) == 1 && policy["retention_duration_seconds"] == float64(2592000) &&
+		unknownOK && len(unknownPolicy) == 1 && unknownPolicy["effective_time"] == true
+}
+
+func approvedInitialAuditBucketServiceAccount(resource resourceChange) bool {
+	return resource.Mode == "managed" && resource.Type == "google_logging_project_bucket_config" &&
+		resourceAddressBase(resource.Address) == "module.audit_root.google_logging_project_bucket_config.audit" &&
+		strings.Join(resource.Change.Actions, ",") == "create" &&
+		nestedUnknown(resource.Change.AfterUnknown, "cmek_settings", "service_account_id")
+}
+
+func approvedInitialWorkforceSecretThumbprint(resource resourceChange) bool {
+	if resource.Mode != "managed" || resource.Address != "module.workforce_identity.google_iam_workforce_pool_provider.oidc" ||
+		strings.Join(resource.Change.Actions, ",") != "create" {
+		return false
+	}
+	after, _ := resource.Change.After.(map[string]any)
+	oidc, oidcOK := singleObject(after["oidc"])
+	secret, secretOK := singleObject(oidc["client_secret"])
+	value, valueOK := singleObject(secret["value"])
+	_, revisionOK := workforceSecretRevision(after)
+	unknownOIDC, unknownOIDCOK := singleObject(firstObject(resource.Change.AfterUnknown)["oidc"])
+	unknownSecret, unknownSecretOK := singleObject(unknownOIDC["client_secret"])
+	unknownValue, unknownValueOK := singleObject(unknownSecret["value"])
+	return oidcOK && secretOK && valueOK && revisionOK && value["plain_text"] == nil && value["plain_text_wo"] == nil &&
+		unknownOIDCOK && unknownSecretOK && unknownValueOK && len(unknownValue) == 1 && unknownValue["thumbprint"] == true
 }
 
 func approvedBinding(resourceType, address, role string) bool {
@@ -5772,6 +5935,33 @@ func validateSigningCryptoKeyVersion(resource resourceChange, after map[string]a
 	validateKnownOrComputedString(resource, after, "protection_level", "HSM", violations)
 }
 
+func validateActiveSigningVersionData(resource resourceChange, after map[string]any, violations *[]string) {
+	const base = "module.signing_root.data.google_kms_crypto_key_version.active"
+	keyName, indexed, valid := terraformAddressStringIndex(resource.Address, base)
+	contract, contractOK := signingKeyDeclaration(resource.signingContract, keyName)
+	actions := strings.Join(resource.Change.Actions, ",")
+	if resource.Mode != "data" || !valid || !indexed || !contractOK || (actions != "read" && actions != "no-op") {
+		*violations = append(*violations, resource.Address+" must read only one exact compiled active signing version")
+		return
+	}
+	if len(after) == 0 && exactUnknownLeafSet(resource.Change.AfterUnknown, []string{
+		"algorithm", "crypto_key", "id", "name", "protection_level", "public_key", "state", "version",
+	}) {
+		return
+	}
+	cryptoKey, _ := after["crypto_key"].(string)
+	name, _ := after["name"].(string)
+	version, _ := after["version"].(string)
+	nameParts := strings.Split(name, "/")
+	validName := len(nameParts) == 10 && strings.Join(nameParts[:8], "/") == cryptoKey &&
+		nameParts[8] == "cryptoKeyVersions" && nameParts[9] == version && numericIDPattern.MatchString(version)
+	if !canonicalSigningCryptoKey(cryptoKey, keyName) || !validName || after["id"] != name ||
+		after["algorithm"] != "EC_SIGN_P256_SHA256" || after["protection_level"] != "HSM" || after["state"] != "ENABLED" ||
+		strings.TrimSpace(stringValue(after["public_key"])) == "" || contract.activeVersionRef == "" || containsUnknown(resource.Change.AfterUnknown) {
+		*violations = append(*violations, resource.Address+" must resolve the exact enabled HSM P-256 active signing version")
+	}
+}
+
 func exactInitialSigningVersionEnvelope(resource resourceChange, after map[string]any) bool {
 	externalOptions, externalOK := after["external_protection_level_options"].([]any)
 	return len(after) == 3 && externalOK && len(externalOptions) == 0 && after["timeouts"] == nil && after["deletion_policy"] == "PREVENT" &&
@@ -5912,7 +6102,7 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 
 	versions, versionsOK := metadata["signing_key_versions"].(map[string]any)
 	windows, windowsOK := metadata["signing_windows"].(map[string]any)
-	valid = valid && versionsOK && windowsOK && exactObjectKeys(versions, signingKeyNames) && exactObjectKeys(windows, signingKeyNames)
+	valid = valid && versionsOK && windowsOK && exactObjectKeys(versions, signingKeyNames) && exactObjectKeys(windows, recoverySigningWindowNames)
 	signingProject := ""
 	for _, key := range signingKeyNames {
 		version, _ := versions[key].(string)
@@ -5926,6 +6116,8 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 		} else if signingProject != parts[1] {
 			valid = false
 		}
+	}
+	for _, key := range recoverySigningWindowNames {
 		window, _ := windows[key].(map[string]any)
 		activeRef, _ := window["active_version_ref"].(string)
 		startText, _ := window["activation_window_start"].(string)
@@ -5948,7 +6140,8 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 	providers, providersOK := metadata["federation_providers"].(map[string]any)
 	audiences, audiencesOK := metadata["federation_audiences"].(map[string]any)
 	valid = valid && providersOK && audiencesOK && exactObjectKeys(providers, federationKeys) && exactObjectKeys(audiences, federationKeys)
-	providerProject := ""
+	identityProviderProject := ""
+	recoveryProviderProject := ""
 	expectedProviderIDs := map[string][2]string{
 		"github-plan":     {"bootstrap-github-plan", "github-actions-plan"},
 		"github-apply":    {"bootstrap-github-apply", "github-actions-apply"},
@@ -5963,15 +6156,18 @@ func validatePublicTrustMetadataContent(resource resourceChange, after map[strin
 		if len(parts) != 8 || parts[0] != "projects" || !numericIDPattern.MatchString(parts[1]) || parts[2] != "locations" ||
 			parts[3] != "global" || parts[4] != "workloadIdentityPools" || parts[5] != expected[0] || parts[6] != "providers" || parts[7] != expected[1] {
 			valid = false
-		} else if providerProject == "" {
-			providerProject = parts[1]
-		} else if providerProject != parts[1] {
+		} else if key == "github-recovery" {
+			recoveryProviderProject = parts[1]
+		} else if identityProviderProject == "" {
+			identityProviderProject = parts[1]
+		} else if identityProviderProject != parts[1] {
 			valid = false
 		}
 		audience, _ := audiences[key].(string)
 		valid = valid && audience != "" && !strings.ContainsAny(audience, "* \t\r\n") &&
-			(strings.HasPrefix(audience, "https://") || strings.HasPrefix(audience, "//iam.googleapis.com/"))
+			(audience == "sts.googleapis.com" || strings.HasPrefix(audience, "https://") || strings.HasPrefix(audience, "//iam.googleapis.com/"))
 	}
+	valid = valid && identityProviderProject != "" && recoveryProviderProject != "" && identityProviderProject != recoveryProviderProject
 
 	backends, backendsOK := metadata["state_backends"].(map[string]any)
 	valid = valid && backendsOK && exactObjectKeys(backends, recoveryStateExportKeys)
@@ -6318,6 +6514,12 @@ func allowedUnknownSecurityValue(resource resourceChange, key string) bool {
 	if key == "default_kms_key_name" {
 		return approvedUnknownBucketCMEK(resource)
 	}
+	if key == "soft_delete_policy" {
+		return approvedStateBucketSoftDeleteUnknowns(resource)
+	}
+	if key == "client_secret" {
+		return approvedInitialWorkforceSecretThumbprint(resource)
+	}
 	if resource.signingVersionCreateProof || resource.initialSigningCreateProof {
 		after, _ := resource.Change.After.(map[string]any)
 		if resource.signingVersionCreateProof && resource.Type == "google_kms_crypto_key_version" && key == "deletion_policy" {
@@ -6328,15 +6530,14 @@ func allowedUnknownSecurityValue(resource resourceChange, key string) bool {
 		}
 	}
 	if key == "encryption" {
-		encryption := firstObject(firstObject(resource.Change.AfterUnknown)["encryption"])
-		return approvedUnknownBucketCMEK(resource) && len(encryption) == 1 &&
-			containsUnknown(encryption["default_kms_key_name"])
+		return approvedStateBucketEncryptionUnknowns(resource)
 	}
 	if key == "kms_key_name" {
 		return resource.Type == "google_logging_project_bucket_config" && base == "module.audit_root.google_logging_project_bucket_config.audit"
 	}
 	if key == "service_account_id" {
-		return resource.Mode == "data" && resource.Type == "google_logging_project_cmek_settings" && base == "module.audit_root.data.google_logging_project_cmek_settings.audit"
+		return (resource.Mode == "data" && resource.Type == "google_logging_project_cmek_settings" && base == "module.audit_root.data.google_logging_project_cmek_settings.audit") ||
+			approvedInitialAuditBucketServiceAccount(resource)
 	}
 	if resource.Type == "google_storage_transfer_job" && transferOutputField(key) {
 		_, _, backendAddress := exactReplicationAddress(resource.Address, "google_storage_transfer_job.replication")
@@ -6344,6 +6545,12 @@ func allowedUnknownSecurityValue(resource resourceChange, key string) bool {
 		return resource.Mode == "managed" && (backendAddress || exportAddress)
 	}
 	if resource.Type == "google_kms_crypto_key_version" && (key == "algorithm" || key == "protection_level") {
+		if resource.Mode == "data" {
+			after, _ := resource.Change.After.(map[string]any)
+			return len(after) == 0 && exactUnknownLeafSet(resource.Change.AfterUnknown, []string{
+				"algorithm", "crypto_key", "id", "name", "protection_level", "public_key", "state", "version",
+			}) && base == "module.signing_root.data.google_kms_crypto_key_version.active"
+		}
 		_, _, ok := declaredSigningVersionAddress(resource.Address, resource.signingContract)
 		return resource.Mode == "managed" && ok
 	}

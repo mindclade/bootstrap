@@ -104,12 +104,18 @@ variable "plan_principal" {
 }
 
 variable "apply_principal" {
-  description = "IAM member used only for protected applies."
+  description = "IAM member used only for protected root-trust applies or independently administered recovery-plane writes."
   type        = string
 
   validation {
-    condition     = can(regex("^serviceAccount:bootstrap-apply@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$", var.apply_principal))
-    error_message = "apply_principal must be the canonical bootstrap-apply service account."
+    condition = (
+      var.backend_prefix == "root-trust" &&
+      can(regex("^serviceAccount:bootstrap-apply@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$", var.apply_principal))
+      ) || (
+      var.backend_prefix == "recovery-plane" &&
+      can(regex("^group:[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.apply_principal))
+    )
+    error_message = "apply_principal must be the canonical bootstrap-apply service account for root-trust or one explicit recovery-administrator group for recovery-plane."
   }
 }
 

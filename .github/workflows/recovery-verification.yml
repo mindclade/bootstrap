@@ -231,7 +231,7 @@ jobs:
           [[ "${RECOVERY_SIGNING_KMS_KEY_VERSION}" =~ ^[1-9][0-9]*$ ]]
           [[ "${WIF_PROVIDER}" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]{4,32}/providers/[a-z0-9-]{4,32}$ ]]
           [[ "${WIF_SERVICE_ACCOUNT}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$ ]]
-          [[ "${WIF_AUDIENCE}" == https://* || "${WIF_AUDIENCE}" == //iam.googleapis.com/* ]]
+          [[ "${WIF_AUDIENCE}" == "sts.googleapis.com" ]]
           for bucket in \
             "${ROOT_TRUST_STATE_BUCKET}" "${ROOT_TRUST_STATE_REPLICA_BUCKET}" \
             "${RECOVERY_STATE_BUCKET}" "${RECOVERY_STATE_REPLICA_BUCKET}" \

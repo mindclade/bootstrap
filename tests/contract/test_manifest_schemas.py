@@ -120,10 +120,10 @@ def valid_render_values():
         ),
         "GITHUB_OIDC_ISSUER_URI": "https://token.actions.githubusercontent.com",
         "GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER": "serviceAccount:github-config-plan@mindclade-identity-root.iam.gserviceaccount.com",
-        "GITOPS_IMMUTABLE_SUBJECT": "repo:mindclade/platform-gitops:ref:refs/heads/main",
+        "GITOPS_IMMUTABLE_SUBJECT": "repo:mindclade/gitops:ref:refs/heads/main",
         "GITOPS_OIDC_AUDIENCE": "https://gitops.example.com/mindclade/bootstrap",
         "GITOPS_OIDC_ISSUER_URI": "https://gitops.example.com",
-        "GITOPS_REPOSITORY": "mindclade/platform-gitops",
+        "GITOPS_REPOSITORY": "mindclade/gitops",
         "INFRASTRUCTURE_LIVE_DISASTER_RECOVERY_WORKFLOW_SHA": "b" * 40,
         "INFRASTRUCTURE_DEVELOPMENT_EXPORT_SIGNER": "serviceAccount:development-apply@mindclade-identity-root.iam.gserviceaccount.com",
         "INFRASTRUCTURE_STAGING_EXPORT_SIGNER": "serviceAccount:staging-apply@mindclade-identity-root.iam.gserviceaccount.com",
@@ -151,14 +151,21 @@ def valid_render_values():
 
 
 def valid_recovery_context(values):
-    project_number = "123456789012"
-    provider_prefix = f"projects/{project_number}/locations/global/workloadIdentityPools"
+    identity_project_number = "123456789012"
+    recovery_project_number = "210987654321"
+    identity_provider_prefix = (
+        f"projects/{identity_project_number}/locations/global/workloadIdentityPools"
+    )
+    recovery_provider_prefix = (
+        f"projects/{recovery_project_number}/locations/global/workloadIdentityPools"
+    )
     return {
         "federation": {
             "github": {
                 "providers": {
-                    role: f"{provider_prefix}/bootstrap-github-{role}/providers/github-actions-{role}"
-                    for role in ("plan", "apply", "recovery")
+                    "plan": f"{identity_provider_prefix}/bootstrap-github-plan/providers/github-actions-plan",
+                    "apply": f"{identity_provider_prefix}/bootstrap-github-apply/providers/github-actions-apply",
+                    "recovery": f"{recovery_provider_prefix}/bootstrap-github-recovery/providers/github-actions-recovery",
                 },
                 "audiences": {
                     role: "sts.googleapis.com"
@@ -166,11 +173,11 @@ def valid_recovery_context(values):
                 },
             },
             "buildkite": {
-                "provider": f"{provider_prefix}/bootstrap-buildkite/providers/buildkite",
+                "provider": f"{identity_provider_prefix}/bootstrap-buildkite/providers/buildkite",
                 "audience": values["BUILDKITE_OIDC_AUDIENCE"],
             },
             "gitops": {
-                "provider": f"{provider_prefix}/bootstrap-gitops/providers/gitops",
+                "provider": f"{identity_provider_prefix}/bootstrap-gitops/providers/gitops",
                 "audience": values["GITOPS_OIDC_AUDIENCE"],
             },
         },
@@ -283,12 +290,194 @@ class ManifestSchemaContractTest(unittest.TestCase):
         )
         return result, output_path
 
+    def validate_recovery_module_variables(self, directory, rendered_output):
+        validation_root = Path(directory) / "recovery-variable-validation"
+        validation_root.mkdir(mode=0o700)
+        shutil.copyfile(
+            self.repository_root / "opentofu/modules/recovery-exports/variables.tf",
+            validation_root / "variables.tf",
+        )
+        rendered = json.loads(rendered_output.read_text(encoding="utf-8"))["recovery"]
+        variables_path = validation_root / "recovery.auto.tfvars.json"
+        variables_path.write_text(json.dumps(rendered), encoding="utf-8")
+        environment = os.environ.copy()
+        environment.update({"TF_IN_AUTOMATION": "1", "TF_INPUT": "0"})
+        initialized = subprocess.run(
+            ["tofu", "init", "-backend=false", "-input=false"],
+            cwd=validation_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            initialized.returncode,
+            0,
+            initialized.stderr + initialized.stdout,
+        )
+        return subprocess.run(
+            [
+                "tofu",
+                "plan",
+                "-input=false",
+                "-lock=false",
+                "-refresh=false",
+                f"-var-file={variables_path}",
+            ],
+            cwd=validation_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def validate_rendered_root_plan(self, directory, rendered_output):
+        validation_root = Path(directory) / "root-plan-validation"
+        opentofu_root = validation_root / "opentofu"
+        shutil.copytree(self.repository_root / "opentofu", opentofu_root)
+        live_root = opentofu_root / "live" / "root-trust"
+        (live_root / "backend.tf").unlink()
+        variables_path = live_root / "bootstrap.auto.tfvars.json"
+        shutil.copyfile(rendered_output, variables_path)
+
+        plugin_cache = Path(self._temporary.name) / "tofu-plugin-cache"
+        plugin_cache.mkdir(mode=0o700, exist_ok=True)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "GOOGLE_OAUTH_ACCESS_TOKEN": "dummy-token",
+                "TF_DATA_DIR": str(validation_root / "tofu-data"),
+                "TF_IN_AUTOMATION": "1",
+                "TF_INPUT": "0",
+                "TF_PLUGIN_CACHE_DIR": str(plugin_cache),
+            }
+        )
+        provider_mirror = environment.get("BOOTSTRAP_PROVIDER_MIRROR")
+        if provider_mirror:
+            mirror_path = Path(provider_mirror)
+            self.assertTrue(mirror_path.is_absolute())
+            self.assertTrue(mirror_path.is_dir())
+            self.assertFalse(mirror_path.is_symlink())
+            cli_config = validation_root / "provider-installation.tfrc"
+            cli_config.write_text(
+                "provider_installation {\n"
+                "  filesystem_mirror {\n"
+                f'    path    = "{mirror_path}"\n'
+                '    include = ["hashicorp/google"]\n'
+                "  }\n"
+                "  direct {\n"
+                '    exclude = ["hashicorp/google"]\n'
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            environment["TF_CLI_CONFIG_FILE"] = str(cli_config)
+
+        initialized = subprocess.run(
+            ["tofu", "init", "-backend=false", "-input=false", "-no-color"],
+            cwd=live_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=180,
+        )
+        self.assertEqual(
+            initialized.returncode,
+            0,
+            initialized.stderr + initialized.stdout,
+        )
+        saved_plan = validation_root / "root.tfplan"
+        planned = subprocess.run(
+            [
+                "tofu",
+                "plan",
+                "-refresh=false",
+                "-lock=false",
+                "-input=false",
+                "-no-color",
+                f"-out={saved_plan}",
+                f"-var-file={variables_path}",
+                "-var=workforce_oidc_client_secret=0123456789abcdef0123456789abcdef",
+                "-var=workforce_oidc_client_secret_version=1",
+            ],
+            cwd=live_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=180,
+        )
+        if planned.returncode != 0:
+            return planned, None
+
+        rendered_plan = subprocess.run(
+            ["tofu", "show", "-json", str(saved_plan)],
+            cwd=live_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=180,
+        )
+        self.assertEqual(
+            rendered_plan.returncode,
+            0,
+            rendered_plan.stderr + rendered_plan.stdout,
+        )
+        plan_json = validation_root / "root.tfplan.json"
+        plan_json.write_text(rendered_plan.stdout, encoding="utf-8")
+        checked = subprocess.run(
+            [
+                str(self.bootstrapctl),
+                "plan-check",
+                "--root",
+                "root-trust",
+                "--plan",
+                str(plan_json),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=180,
+        )
+        return planned, checked
+
     def test_authoritative_repository_validates(self):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["files"], 96)
         self.assertEqual(payload["manifests"], 7)
+
+    @unittest.skipIf(
+        runfiles_source_root() is not None,
+        "evaluated OpenTofu plans run in the direct Python CI gate before Bazel",
+    )
+    def test_rendered_root_trust_variables_produce_an_evaluated_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rendered, output = self.render_root(directory, valid_render_values())
+            self.assertEqual(rendered.returncode, 0, rendered.stderr + rendered.stdout)
+            planned, checked = self.validate_rendered_root_plan(directory, output)
+            self.assertEqual(planned.returncode, 0, planned.stderr + planned.stdout)
+            self.assertIn("Plan:", planned.stdout)
+            self.assertIsNotNone(checked)
+            self.assertEqual(checked.returncode, 0, checked.stderr + checked.stdout)
+
+    @unittest.skipIf(
+        runfiles_source_root() is not None,
+        "OpenTofu variable validation runs in the direct Python CI gate before Bazel",
+    )
+    def test_rendered_recovery_variables_pass_module_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rendered, output = self.render_recovery(
+                directory,
+                valid_render_values(),
+                valid_recovery_context(valid_render_values()),
+            )
+            self.assertEqual(rendered.returncode, 0, rendered.stderr + rendered.stdout)
+            validated = self.validate_recovery_module_variables(directory, output)
+            self.assertEqual(validated.returncode, 0, validated.stderr + validated.stdout)
 
     def test_every_schema_is_closed(self):
         schemas = sorted((self.repository_root / "schemas" / "v1").glob("*.schema.json"))
@@ -336,8 +525,199 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertIn(
             '"assertion.repository_visibility == \'private\'"', module
         )
+        self.assertIn('"assertion.repository ==', module)
+        self.assertNotIn('"attribute.repo"', module)
+        self.assertNotIn("assertion.repo ==", module)
+        self.assertNotIn(":context:", module)
+        self.assertNotIn("%3A", module)
+        self.assertIn(":environment:${each.value.environment}:workflow_ref:", module)
         self.assertIn("allowed_audiences = [each.value.audience]", module)
         self.assertIn('allowed_audiences = ["sts.googleapis.com"]', module)
+
+    def test_github_subject_mappings_are_bounded_and_role_separated(self):
+        module = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "main.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "'bootstrap-${each.key}:' + assertion.repository_id", module
+        )
+        self.assertIn(
+            "'github-config-${each.key}:' + assertion.repository_id", module
+        )
+        self.assertIn(
+            "'infrastructure-live-${each.key}:' + assertion.repository_id", module
+        )
+        self.assertIn(
+            "'infrastructure-live-drift-plan:' + assertion.repository_id", module
+        )
+        self.assertIn(
+            "'ci-evidence-${each.key}:' + assertion.repository_id", module
+        )
+        self.assertNotIn('= "assertion.sub"', module)
+
+        bootstrap_repository = "1350991612"
+        github_config_repository = "1350986053"
+        infrastructure_repository = "1350992171"
+        estate_repositories = (
+            "1350980188",
+            "1350986053",
+            "1350991612",
+            "1350991963",
+            "1350992171",
+            "1351193819",
+        )
+        contracts = [
+            ("bootstrap-plan", bootstrap_repository, "bootstrap-plan"),
+            ("bootstrap-apply", bootstrap_repository, "bootstrap-apply"),
+            ("bootstrap-recovery", bootstrap_repository, "bootstrap-recovery"),
+            ("github-config-plan", github_config_repository, "github-config"),
+            ("github-config-apply", github_config_repository, "github-config"),
+            *[
+                (
+                    f"infrastructure-live-{environment}-{role}",
+                    infrastructure_repository,
+                    "infrastructure-live",
+                )
+                for environment in (
+                    "development",
+                    "staging",
+                    "production",
+                    "restricted",
+                )
+                for role in ("plan", "apply")
+            ],
+            (
+                "infrastructure-live-drift-plan",
+                infrastructure_repository,
+                "infrastructure-live",
+            ),
+            *[
+                ("ci-evidence-writer", repository_id, "github-ci-evidence")
+                for repository_id in estate_repositories
+            ],
+            (
+                "ci-evidence-verifier",
+                infrastructure_repository,
+                "github-ci-evidence",
+            ),
+        ]
+        values_by_pool = {}
+        for role, repository_id, pool in contracts:
+            with self.subTest(role=role, repository_id=repository_id):
+                expression = f"'{role}:' + assertion.repository_id"
+                value = f"{role}:{repository_id}"
+                self.assertLessEqual(len(expression), 127)
+                self.assertLessEqual(len(value), 127)
+                values_by_pool.setdefault(pool, []).append(value)
+        for pool, values in values_by_pool.items():
+            with self.subTest(pool=pool):
+                self.assertEqual(len(values), len(set(values)))
+
+        github_config_provider = module.split(
+            'resource "google_iam_workload_identity_pool_provider" "github_config"',
+            1,
+        )[1].split(
+            'resource "google_service_account" "github_config"',
+            1,
+        )[0]
+        github_config_mapping = github_config_provider.split(
+            "attribute_mapping = {", 1
+        )[1].split("\n  }\n\n  attribute_condition", 1)[0]
+        self.assertIn('"attribute.ref"', github_config_mapping)
+        self.assertNotIn('"attribute.environment"', github_config_mapping)
+        self.assertNotIn("assertion.environment", github_config_mapping)
+        self.assertIn(
+            '"attribute.github_config_identity" = "\'${each.key}\'"',
+            github_config_mapping,
+        )
+        self.assertIn(
+            "/attribute.github_config_identity/${each.key}", module
+        )
+        self.assertNotIn(
+            "/attribute.repository_id/${var.github_config.repository_id}", module
+        )
+
+    def test_recovery_audience_preflight_accepts_exact_provider_audience(self):
+        workflow = (
+            self.repository_root
+            / ".github"
+            / "workflows"
+            / "recovery-verification.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '[[ "${WIF_AUDIENCE}" == "sts.googleapis.com" ]]',
+            workflow,
+        )
+        self.assertNotIn('"${WIF_AUDIENCE}" == https://*', workflow)
+        self.assertNotIn('"${WIF_AUDIENCE}" == //iam.googleapis.com/*', workflow)
+
+    def test_github_provider_display_names_fit_google_api_limits(self):
+        module = (
+            self.repository_root
+            / "opentofu"
+            / "modules"
+            / "github-federation"
+            / "main.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn('display_name                       = "infra-live ${each.key}"', module)
+        self.assertNotIn(
+            'display_name                       = "infrastructure-live ${each.key}"',
+            module,
+        )
+
+        infrastructure_identities = (
+            "development-plan",
+            "development-apply",
+            "staging-plan",
+            "staging-apply",
+            "production-plan",
+            "production-apply",
+            "restricted-plan",
+            "restricted-apply",
+        )
+        contracts = [
+            *[
+                (
+                    f"bootstrap GitHub {role}",
+                    f"Claim-restricted GitHub provider for bootstrap {role} operations",
+                )
+                for role in ("plan", "apply", "recovery")
+            ],
+            *[
+                (
+                    f"github-config {role}",
+                    f"Exact activation-gated GitHub trust for github-config {role}",
+                )
+                for role in ("plan", "apply")
+            ],
+            *[
+                (
+                    f"infra-live {identity}",
+                    f"Exact immutable GitHub trust for infrastructure-live {identity}",
+                )
+                for identity in infrastructure_identities
+            ],
+            (
+                "infrastructure-live drift plan",
+                "Exact activation-gated GitHub trust for infrastructure-live drift observation",
+            ),
+            *[
+                (
+                    f"GitHub CI evidence {role}",
+                    f"Claim-restricted GitHub CI evidence {role} identity",
+                )
+                for role in ("writer", "verifier")
+            ],
+        ]
+        self.assertEqual(len(contracts), 16)
+        for display_name, description in contracts:
+            with self.subTest(display_name=display_name):
+                self.assertLessEqual(len(display_name.encode("utf-8")), 32)
+                self.assertLessEqual(len(description.encode("utf-8")), 256)
 
     def test_provider_packages_are_installed_only_from_exact_hash_verified_mirrors(self):
         linux_amd64 = "zh:5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171"
@@ -877,6 +1257,14 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 first_payload["bootstrap"]["buildkite"]["step_key"],
                 "bootstrap-ring0-signing",
             )
+            self.assertEqual(
+                first_payload["bootstrap"]["gitops"]["repository"],
+                "mindclade/gitops",
+            )
+            self.assertEqual(
+                first_payload["bootstrap"]["gitops"]["subject"],
+                "repo:mindclade/gitops:ref:refs/heads/main",
+            )
             ci_evidence = first_payload["bootstrap"]["github_ci_evidence"]
             self.assertFalse(ci_evidence["activation_enabled"])
             self.assertEqual(ci_evidence["pool_id"], "github-ci-evidence")
@@ -1138,6 +1526,22 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 self.assertIn("Buildkite", result.stderr)
                 self.assertFalse(output.exists())
 
+    def test_root_trust_render_requires_canonical_gitops_identity(self):
+        invalid_values = {
+            "GITOPS_REPOSITORY": "mindclade/platform-gitops",
+            "GITOPS_IMMUTABLE_SUBJECT": (
+                "repo:mindclade/platform-gitops:ref:refs/heads/main"
+            ),
+        }
+        for name, invalid_value in invalid_values.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                values = valid_render_values()
+                values[name] = invalid_value
+                result, output = self.render_root(directory, values)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("GitOps", result.stderr)
+                self.assertFalse(output.exists())
+
     def test_root_trust_render_rejects_mutable_ci_evidence_workflows(self):
         invalid_values = {
             "GITHUB_CI_EVIDENCE_JOB_WORKFLOW_REF": (
@@ -1176,6 +1580,27 @@ class ManifestSchemaContractTest(unittest.TestCase):
             result, output = self.render_recovery(directory, values, context)
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             payload = json.loads(output.read_text(encoding="utf-8"))["recovery"]
+            self.assertEqual(
+                set(payload["public_trust_metadata"]["signing_key_versions"]),
+                {
+                    "audit-anchor",
+                    "bootstrap-handoff",
+                    "github-config-plan-evidence",
+                    "infrastructure-export",
+                    "recovery-evidence",
+                },
+            )
+            self.assertEqual(
+                set(payload["public_trust_metadata"]["signing_windows"]),
+                {"audit-anchor", "bootstrap-handoff", "recovery-evidence"},
+            )
+            self.assertEqual(
+                {
+                    payload["public_trust_metadata"]["federation_audiences"][name]
+                    for name in ("github-plan", "github-apply", "github-recovery")
+                },
+                {"sts.googleapis.com"},
+            )
             self.assertEqual(
                 payload["public_trust_metadata"]["state_backends"],
                 {
@@ -1233,6 +1658,25 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("does not match deployed root-trust inputs", result.stderr)
                 self.assertFalse(output.exists())
+
+    def test_recovery_render_requires_recovery_project_federation_isolation(self):
+        values = valid_render_values()
+        context = valid_recovery_context(values)
+        identity_number = context["federation"]["github"]["providers"]["plan"].split("/")[1]
+        recovery_provider = context["federation"]["github"]["providers"]["recovery"]
+        recovery_number = recovery_provider.split("/")[1]
+        context["federation"]["github"]["providers"]["recovery"] = (
+            recovery_provider.replace(
+                f"projects/{recovery_number}/",
+                f"projects/{identity_number}/",
+                1,
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result, output = self.render_recovery(directory, values, context)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("distinct recovery-project number", result.stderr)
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
