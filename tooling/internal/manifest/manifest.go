@@ -1769,6 +1769,7 @@ func (c *compiler) validateContracts() {
 		"custom/bootstrapRecoveryPlanRead",
 		"custom/bootstrapStatePlanLock",
 		"roles/browser",
+		"roles/cloudkms.publicKeyViewer",
 		"roles/cloudkms.viewer",
 		"roles/iam.roleViewer",
 		"roles/iam.securityReviewer",

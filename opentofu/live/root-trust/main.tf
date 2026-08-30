@@ -476,6 +476,7 @@ locals {
       project = var.bootstrap.projects.signing.id
       roles = toset([
         "roles/browser",
+        "roles/cloudkms.publicKeyViewer",
         "roles/cloudkms.viewer",
         "roles/iam.roleViewer",
         "roles/iam.securityReviewer",

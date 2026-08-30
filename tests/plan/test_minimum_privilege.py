@@ -1,11 +1,19 @@
 """Adversarial tests for Ring-0 OpenTofu plan classification."""
 
+import copy
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+
+
+ACTIVE_SIGNING_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErp5ckXjgHSqIb2af/45Lat+pw0HK
+mRlf0R6uyEmYOcJ9OUMWh7B4DftTdqcSXXK0cFf0RwQvPW9WBhTWPqEAWQ==
+-----END PUBLIC KEY-----
+"""
 
 
 def runfiles_directory():
@@ -968,6 +976,88 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             f'[{json.dumps(f"{key_name}:{version_ref}")}]'
         )
         return resource
+
+    def active_signing_values(self, key_name, version_number=1):
+        crypto_key = (
+            "projects/bootstrap-signing/locations/us-central1/"
+            f"keyRings/bootstrap-signing/cryptoKeys/{key_name}"
+        )
+        name = f"{crypto_key}/cryptoKeyVersions/{version_number}"
+        return {
+            "algorithm": "EC_SIGN_P256_SHA256",
+            "crypto_key": crypto_key,
+            "id": f"//cloudkms.googleapis.com/v1/{name}",
+            "name": name,
+            "protection_level": "HSM",
+            "public_key": [
+                {
+                    "algorithm": "EC_SIGN_P256_SHA256",
+                    "pem": ACTIVE_SIGNING_PUBLIC_KEY_PEM,
+                }
+            ],
+            "state": "ENABLED",
+            "version": version_number,
+        }
+
+    def active_signing_data(self, key_name="audit-anchor", version_number=1):
+        values = self.active_signing_values(key_name, version_number)
+        address = (
+            "module.signing_root.data.google_kms_crypto_key_version.active"
+            f'[{json.dumps(key_name)}]'
+        )
+        resource = {
+            "address": address,
+            "mode": "data",
+            "type": "google_kms_crypto_key_version",
+            "change": {
+                "actions": ["no-op"],
+                "before": copy.deepcopy(values),
+                "after": copy.deepcopy(values),
+                "after_unknown": {},
+            },
+        }
+        planned = {
+            "address": address,
+            "mode": "data",
+            "type": "google_kms_crypto_key_version",
+            "name": "active",
+            "index": key_name,
+            "provider_name": "registry.opentofu.org/hashicorp/google",
+            "schema_version": 0,
+            "values": copy.deepcopy(values),
+        }
+        return resource, planned
+
+    def active_signing_document(
+        self,
+        data_resource,
+        planned_resource,
+        managed_version=None,
+    ):
+        key_name = data_resource["address"].split('["', 1)[1].split('"]', 1)[0]
+        if managed_version is None:
+            values = data_resource["change"]["after"]
+            version_number = values.get("version", 1)
+            managed_version = self.signing_version(
+                key_name,
+                actions=["no-op"],
+                version_number=str(version_number),
+            )
+        return {
+            "format_version": "1.2",
+            "terraform_version": "1.12.6",
+            "resource_changes": [managed_version, data_resource],
+            "planned_values": {
+                "root_module": {
+                    "child_modules": [
+                        {
+                            "address": "module.signing_root",
+                            "resources": [planned_resource],
+                        }
+                    ]
+                }
+            },
+        }
 
     def signing_binding(
         self,
@@ -2162,6 +2252,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             "signing": (
                 "roles/browser",
+                "roles/cloudkms.publicKeyViewer",
                 "roles/cloudkms.viewer",
                 "roles/iam.roleViewer",
                 "roles/iam.securityReviewer",
@@ -2216,6 +2307,90 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     resources.append(resource)
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_public_key_viewer_is_limited_to_the_plan_identity_signing_project(self):
+        signing_project = self.project_resource("signing", "bootstrap-signing")
+        binding = self.resource(
+            "google_project_iam_member",
+            ["create"],
+            {
+                "project": "bootstrap-signing",
+                "role": "roles/cloudkms.publicKeyViewer",
+                "member": (
+                    "serviceAccount:bootstrap-plan@bootstrap-state-root."
+                    "iam.gserviceaccount.com"
+                ),
+            },
+        )
+        binding["address"] = (
+            'google_project_iam_member.plan_read['
+            '"signing:roles/cloudkms.publicKeyViewer"]'
+        )
+        result = self.check_plan([signing_project, binding])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        mutations = (
+            (
+                "apply-member",
+                lambda value: value[1]["change"]["after"].update(
+                    {
+                        "member": (
+                            "serviceAccount:bootstrap-apply@bootstrap-state-root."
+                            "iam.gserviceaccount.com"
+                        )
+                    }
+                ),
+            ),
+            (
+                "state-project",
+                lambda value: (
+                    value[1].update(
+                        {
+                            "address": (
+                                'google_project_iam_member.plan_read['
+                                '"state:roles/cloudkms.publicKeyViewer"]'
+                            )
+                        }
+                    ),
+                    value[1]["change"]["after"].update(
+                        {"project": "bootstrap-state-root"}
+                    ),
+                ),
+            ),
+            (
+                "apply-address",
+                lambda value: value[1].update(
+                    {
+                        "address": (
+                            'google_project_iam_member.apply_administration['
+                            '"signing:roles/cloudkms.publicKeyViewer"]'
+                        )
+                    }
+                ),
+            ),
+            (
+                "signer-role",
+                lambda value: (
+                    value[1].update(
+                        {
+                            "address": (
+                                'google_project_iam_member.plan_read['
+                                '"signing:roles/cloudkms.signerVerifier"]'
+                            )
+                        }
+                    ),
+                    value[1]["change"]["after"].update(
+                        {"role": "roles/cloudkms.signerVerifier"}
+                    ),
+                ),
+            ),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                resources = copy.deepcopy([signing_project, binding])
+                mutate(resources)
+                result = self.check_plan(resources)
+                self.assertNotEqual(result.returncode, 0)
 
     def test_replication_custom_roles_exact_permissions_are_accepted(self):
         contracts = {
@@ -3285,6 +3460,213 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("skip_initial_version_creation", result.stderr)
+
+    def test_active_signing_version_accepts_google_7_42_resolved_shape(self):
+        resource, planned = self.active_signing_data(version_number=2)
+        document = self.active_signing_document(
+            resource,
+            planned,
+            self.signing_version(
+                "audit-anchor",
+                actions=["no-op"],
+                version_number="2",
+            ),
+        )
+        result = self.run_plan_document("plan-resource-check", document)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_active_signing_version_accepts_exact_deferred_reads(self):
+        resource, planned = self.active_signing_data()
+        resource["change"].update(
+            {
+                "actions": ["read"],
+                "before": None,
+                "after": {},
+                "after_unknown": {
+                    field: True
+                    for field in (
+                        "algorithm",
+                        "crypto_key",
+                        "id",
+                        "name",
+                        "protection_level",
+                        "public_key",
+                        "state",
+                        "version",
+                    )
+                },
+            }
+        )
+        planned["values"] = None
+        result = self.run_plan_document(
+            "plan-resource-check",
+            self.active_signing_document(resource, planned),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        resource, planned = self.active_signing_data()
+        prior = copy.deepcopy(resource["change"]["before"])
+        crypto_key = resource["change"]["after"]["crypto_key"]
+        resource["change"].update(
+            {
+                "actions": ["read"],
+                "before": prior,
+                "after": {"crypto_key": crypto_key},
+                "after_unknown": {
+                    field: True
+                    for field in (
+                        "algorithm",
+                        "id",
+                        "name",
+                        "protection_level",
+                        "public_key",
+                        "state",
+                        "version",
+                    )
+                },
+            }
+        )
+        planned["values"] = {
+            "crypto_key": crypto_key,
+            **{field: None for field in resource["change"]["after_unknown"]},
+        }
+        result = self.run_plan_document(
+            "plan-resource-check",
+            self.active_signing_document(resource, planned),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_active_signing_version_rejects_malformed_provider_shapes(self):
+        resource, planned = self.active_signing_data()
+        base = self.active_signing_document(resource, planned)
+        planned_path = lambda value: value["planned_values"]["root_module"][
+            "child_modules"
+        ][0]["resources"][0]
+        mutations = (
+            (
+                "string-version",
+                lambda value: value["resource_changes"][1]["change"]["after"].update(
+                    {"version": "1"}
+                ),
+            ),
+            (
+                "fractional-version",
+                lambda value: value["resource_changes"][1]["change"]["after"].update(
+                    {"version": 1.5}
+                ),
+            ),
+            (
+                "zero-version",
+                lambda value: value["resource_changes"][1]["change"]["after"].update(
+                    {"version": 0}
+                ),
+            ),
+            (
+                "provider-id-equals-name",
+                lambda value: value["resource_changes"][1]["change"]["after"].update(
+                    {
+                        "id": value["resource_changes"][1]["change"]["after"][
+                            "name"
+                        ]
+                    }
+                ),
+            ),
+            (
+                "scalar-public-key",
+                lambda value: value["resource_changes"][1]["change"]["after"].update(
+                    {"public_key": ACTIVE_SIGNING_PUBLIC_KEY_PEM}
+                ),
+            ),
+            (
+                "multiple-public-keys",
+                lambda value: value["resource_changes"][1]["change"]["after"][
+                    "public_key"
+                ].append(copy.deepcopy(value["resource_changes"][1]["change"]["after"]["public_key"][0])),
+            ),
+            (
+                "malformed-pem",
+                lambda value: value["resource_changes"][1]["change"]["after"][
+                    "public_key"
+                ][0].update({"pem": "not a public key"}),
+            ),
+            (
+                "resolved-unknown",
+                lambda value: value["resource_changes"][1]["change"].update(
+                    {"after_unknown": {"state": True}}
+                ),
+            ),
+            (
+                "before-after-mismatch",
+                lambda value: value["resource_changes"][1]["change"]["before"].update(
+                    {"state": "DISABLED"}
+                ),
+            ),
+            (
+                "planned-value-mismatch",
+                lambda value: planned_path(value)["values"].update(
+                    {"state": "DISABLED"}
+                ),
+            ),
+            (
+                "wrong-planned-provider",
+                lambda value: planned_path(value).update(
+                    {"provider_name": "registry.opentofu.org/example/google"}
+                ),
+            ),
+            (
+                "missing-planned-values",
+                lambda value: value.pop("planned_values"),
+            ),
+            (
+                "duplicate-planned-address",
+                lambda value: value["planned_values"]["root_module"][
+                    "child_modules"
+                ][0]["resources"].append(copy.deepcopy(planned_path(value))),
+            ),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                document = copy.deepcopy(base)
+                mutate(document)
+                result = self.run_plan_document("plan-resource-check", document)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+
+        resource, planned = self.active_signing_data(version_number=1)
+        stale = self.active_signing_document(
+            resource,
+            planned,
+            self.signing_version(
+                "audit-anchor",
+                actions=["no-op"],
+                version_number="2",
+            ),
+        )
+        result = self.run_plan_document("plan-resource-check", stale)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("activeVersionRef", result.stderr)
+
+        resource, planned = self.active_signing_data()
+        resource["change"].update(
+            {
+                "actions": ["no-op"],
+                "before": None,
+                "after": {},
+                "after_unknown": {
+                    field: True for field in (
+                        "algorithm", "crypto_key", "id", "name",
+                        "protection_level", "public_key", "state", "version",
+                    )
+                },
+            }
+        )
+        planned["values"] = {
+            field: None for field in resource["change"]["after_unknown"]
+        }
+        result = self.run_plan_document(
+            "plan-resource-check",
+            self.active_signing_document(resource, planned),
+        )
+        self.assertNotEqual(result.returncode, 0)
 
     def test_initial_signing_create_unknowns_require_exact_bound_configuration(self):
         document = self.initial_signing_create_document()

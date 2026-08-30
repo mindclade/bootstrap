@@ -2,8 +2,13 @@
 package plan
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -344,7 +349,7 @@ func addRootTrustAddressKeys() {
 		"state":    {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer", "roles/storagetransfer.viewer"},
 		"recovery": {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/iam.serviceAccountViewer", "roles/iam.workloadIdentityPoolViewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer", "roles/storagetransfer.viewer"},
 		"audit":    {"roles/browser", "roles/cloudkms.viewer", "roles/iam.securityReviewer", "roles/serviceusage.serviceUsageViewer"},
-		"signing":  {"roles/browser", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer"},
+		"signing":  {"roles/browser", "roles/cloudkms.publicKeyViewer", "roles/cloudkms.viewer", "roles/iam.roleViewer", "roles/iam.securityReviewer", "roles/privilegedaccessmanager.viewer", "roles/serviceusage.serviceUsageViewer"},
 	}
 	var readKeys []string
 	for project, roles := range readRoles {
@@ -380,6 +385,7 @@ var approvedRoles = map[string]bool{
 	"roles/browser":                              true,
 	"roles/cloudkms.admin":                       true,
 	"roles/cloudkms.cryptoKeyEncrypterDecrypter": true,
+	"roles/cloudkms.publicKeyViewer":             true,
 	"roles/cloudkms.signerVerifier":              true,
 	"roles/cloudkms.viewer":                      true,
 	"roles/iam.securityAdmin":                    true,
@@ -632,6 +638,7 @@ type document struct {
 	FormatVersion    string           `json:"format_version"`
 	TerraformVersion string           `json:"terraform_version"`
 	ResourceChanges  []resourceChange `json:"resource_changes"`
+	PlannedValues    plannedValues    `json:"planned_values"`
 	OutputChanges    map[string]struct {
 		Actions      []string `json:"actions"`
 		Before       any      `json:"before"`
@@ -642,6 +649,27 @@ type document struct {
 	Variables     map[string]struct {
 		Value any `json:"value"`
 	} `json:"variables"`
+}
+
+type plannedValues struct {
+	RootModule *plannedModule `json:"root_module"`
+}
+
+type plannedModule struct {
+	Address      string            `json:"address"`
+	Resources    []plannedResource `json:"resources"`
+	ChildModules []plannedModule   `json:"child_modules"`
+}
+
+type plannedResource struct {
+	Address       string         `json:"address"`
+	Mode          string         `json:"mode"`
+	Type          string         `json:"type"`
+	Name          string         `json:"name"`
+	Index         any            `json:"index"`
+	ProviderName  string         `json:"provider_name"`
+	SchemaVersion float64        `json:"schema_version"`
+	Values        map[string]any `json:"values"`
 }
 
 type resourceChange struct {
@@ -658,6 +686,7 @@ type resourceChange struct {
 	auditLock                 auditLockContract
 	signingVersionCreateProof bool
 	initialSigningCreateProof bool
+	plannedValue              *plannedResource
 }
 
 type auditLockContract struct {
@@ -959,6 +988,33 @@ func sameJSONValue(left, right any) bool {
 	return leftError == nil && rightError == nil && string(leftJSON) == string(rightJSON)
 }
 
+func indexPlannedResources(values plannedValues) (map[string]plannedResource, []string) {
+	index := map[string]plannedResource{}
+	var violations []string
+	if values.RootModule == nil {
+		return index, violations
+	}
+	var visit func(plannedModule)
+	visit = func(module plannedModule) {
+		for _, resource := range module.Resources {
+			if resource.Address == "" {
+				violations = append(violations, "planned_values contains a resource without an address")
+				continue
+			}
+			if _, exists := index[resource.Address]; exists {
+				violations = append(violations, resource.Address+" appears more than once in planned_values")
+				continue
+			}
+			index[resource.Address] = resource
+		}
+		for _, child := range module.ChildModules {
+			visit(child)
+		}
+	}
+	visit(*values.RootModule)
+	return index, violations
+}
+
 // Analyze classifies a tofu show -json document and detects Ring-0 violations.
 func Analyze(data []byte) (Summary, error) {
 	var parsed document
@@ -979,6 +1035,8 @@ func Analyze(data []byte) (Summary, error) {
 	if !present {
 		contract = defaultSigningContract()
 	}
+	plannedResources, plannedViolations := indexPlannedResources(parsed.PlannedValues)
+	result.Violations = append(result.Violations, plannedViolations...)
 	validateConfigurationSafety(parsed.Configuration, &result.Violations)
 	auditLock, auditLockError := auditLockContractFromVariables(parsed.Variables, contract)
 	if auditLockError != nil {
@@ -995,6 +1053,10 @@ func Analyze(data []byte) (Summary, error) {
 			resourceAddressBase(resource.Address) == "module.signing_root.google_kms_crypto_key_version.signing"
 		resource.initialSigningCreateProof = initialSigningProof && strings.Join(resource.Change.Actions, ",") == "create" &&
 			initialSigningIAMAddressUsesCreatedActiveVersion(resource.Address, activeCreateKeys)
+		if planned, ok := plannedResources[resource.Address]; ok {
+			plannedCopy := planned
+			resource.plannedValue = &plannedCopy
+		}
 		parsed.ResourceChanges[index] = resource
 		if resource.Address == "" || resource.Type == "" {
 			result.Violations = append(result.Violations, "plan contains a resource change without a complete address/type")
@@ -4757,15 +4819,37 @@ func stringValue(value any) string {
 
 func validateSigningVersionGraph(resources []resourceChange, contract *signingContract, violations *[]string) {
 	activeVersions := map[string]string{}
+	activeParents := map[string]string{}
 	for _, resource := range resources {
 		keyName, versionRef, ok := declaredSigningVersionAddress(resource.Address, contract)
 		if !ok || contract.keys[keyName].activeVersionRef != versionRef || resource.Type != "google_kms_crypto_key_version" {
 			continue
 		}
 		after, _ := resource.Change.After.(map[string]any)
+		cryptoKey, _ := after["crypto_key"].(string)
 		name, _ := after["name"].(string)
+		if cryptoKey != "" {
+			activeParents[keyName] = cryptoKey
+		}
 		if name != "" {
 			activeVersions[keyName] = name
+		}
+	}
+	for _, resource := range resources {
+		const base = "module.signing_root.data.google_kms_crypto_key_version.active"
+		keyName, indexed, valid := terraformAddressStringIndex(resource.Address, base)
+		if resource.Mode != "data" || resource.Type != "google_kms_crypto_key_version" || !valid || !indexed {
+			continue
+		}
+		after, _ := resource.Change.After.(map[string]any)
+		cryptoKey, _ := after["crypto_key"].(string)
+		name, _ := after["name"].(string)
+		if name != "" {
+			if activeVersions[keyName] == "" || name != activeVersions[keyName] {
+				*violations = append(*violations, resource.Address+" must resolve the managed version selected by activeVersionRef")
+			}
+		} else if cryptoKey != "" && (activeParents[keyName] == "" || cryptoKey != activeParents[keyName]) {
+			*violations = append(*violations, resource.Address+" deferred read must use the managed active version's canonical parent key")
 		}
 	}
 	for _, resource := range resources {
@@ -5938,28 +6022,123 @@ func validateSigningCryptoKeyVersion(resource resourceChange, after map[string]a
 func validateActiveSigningVersionData(resource resourceChange, after map[string]any, violations *[]string) {
 	const base = "module.signing_root.data.google_kms_crypto_key_version.active"
 	keyName, indexed, valid := terraformAddressStringIndex(resource.Address, base)
-	contract, contractOK := signingKeyDeclaration(resource.signingContract, keyName)
+	_, contractOK := signingKeyDeclaration(resource.signingContract, keyName)
 	actions := strings.Join(resource.Change.Actions, ",")
 	if resource.Mode != "data" || !valid || !indexed || !contractOK || (actions != "read" && actions != "no-op") {
 		*violations = append(*violations, resource.Address+" must read only one exact compiled active signing version")
 		return
 	}
-	if len(after) == 0 && exactUnknownLeafSet(resource.Change.AfterUnknown, []string{
-		"algorithm", "crypto_key", "id", "name", "protection_level", "public_key", "state", "version",
-	}) {
+	valid = activeSigningPlannedValueMatches(resource, keyName, after)
+	if activeSigningVersionDeferredEnvelope(resource, after) {
+		beforeValid := resource.Change.Before == nil
+		if len(after) != 0 {
+			beforeValid = validResolvedActiveSigningVersionValue(resource.Change.Before, keyName)
+		}
+		if actions != "read" || !beforeValid || !valid {
+			*violations = append(*violations, resource.Address+" must use the exact deferred active-signing read envelope")
+		}
 		return
 	}
-	cryptoKey, _ := after["crypto_key"].(string)
-	name, _ := after["name"].(string)
-	version, _ := after["version"].(string)
-	nameParts := strings.Split(name, "/")
-	validName := len(nameParts) == 10 && strings.Join(nameParts[:8], "/") == cryptoKey &&
-		nameParts[8] == "cryptoKeyVersions" && nameParts[9] == version && numericIDPattern.MatchString(version)
-	if !canonicalSigningCryptoKey(cryptoKey, keyName) || !validName || after["id"] != name ||
-		after["algorithm"] != "EC_SIGN_P256_SHA256" || after["protection_level"] != "HSM" || after["state"] != "ENABLED" ||
-		strings.TrimSpace(stringValue(after["public_key"])) == "" || contract.activeVersionRef == "" || containsUnknown(resource.Change.AfterUnknown) {
+	_, _, resolved := resolvedActiveSigningVersion(after, keyName)
+	valid = valid && resolved && exactTopLevelUnknowns(resource.Change.AfterUnknown, nil)
+	if actions == "no-op" {
+		before, beforeOK := resource.Change.Before.(map[string]any)
+		valid = valid && beforeOK && sameJSONValue(before, after)
+	} else if resource.Change.Before != nil {
+		valid = valid && validResolvedActiveSigningVersionValue(resource.Change.Before, keyName)
+	}
+	if !valid {
 		*violations = append(*violations, resource.Address+" must resolve the exact enabled HSM P-256 active signing version")
 	}
+}
+
+var activeSigningVersionFields = []string{
+	"algorithm", "crypto_key", "id", "name", "protection_level", "public_key", "state", "version",
+}
+
+func activeSigningVersionDeferredEnvelope(resource resourceChange, after map[string]any) bool {
+	const base = "module.signing_root.data.google_kms_crypto_key_version.active"
+	keyName, indexed, valid := terraformAddressStringIndex(resource.Address, base)
+	_, contractOK := signingKeyDeclaration(resource.signingContract, keyName)
+	if resource.Mode != "data" || !valid || !indexed || !contractOK {
+		return false
+	}
+	if len(after) == 0 {
+		return exactTopLevelUnknowns(resource.Change.AfterUnknown, activeSigningVersionFields)
+	}
+	cryptoKey, _ := after["crypto_key"].(string)
+	return exactObjectKeys(after, []string{"crypto_key"}) && canonicalSigningCryptoKey(cryptoKey, keyName) &&
+		exactTopLevelUnknowns(resource.Change.AfterUnknown, []string{
+			"algorithm", "id", "name", "protection_level", "public_key", "state", "version",
+		})
+}
+
+func activeSigningPlannedValueMatches(resource resourceChange, keyName string, after map[string]any) bool {
+	planned := resource.plannedValue
+	if planned == nil || planned.Address != resource.Address || planned.Mode != "data" ||
+		planned.Type != "google_kms_crypto_key_version" || planned.Name != "active" ||
+		planned.ProviderName != "registry.opentofu.org/hashicorp/google" || planned.SchemaVersion != 0 {
+		return false
+	}
+	index, indexOK := planned.Index.(string)
+	if !indexOK || index != keyName {
+		return false
+	}
+	unknowns, _ := resource.Change.AfterUnknown.(map[string]any)
+	knownProjection := map[string]any{}
+	for key, value := range planned.Values {
+		if unknowns[key] == true {
+			continue
+		}
+		knownProjection[key] = value
+	}
+	return sameJSONValue(knownProjection, after)
+}
+
+func validResolvedActiveSigningVersionValue(value any, keyName string) bool {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, _, valid := resolvedActiveSigningVersion(object, keyName)
+	return valid
+}
+
+func resolvedActiveSigningVersion(value map[string]any, keyName string) (string, string, bool) {
+	if !exactObjectKeys(value, activeSigningVersionFields) {
+		return "", "", false
+	}
+	cryptoKey, _ := value["crypto_key"].(string)
+	name, _ := value["name"].(string)
+	version, versionOK := positiveJSONInteger(value["version"])
+	publicKey, publicKeyOK := singleObject(value["public_key"])
+	publicKeyAlgorithm, _ := publicKey["algorithm"].(string)
+	publicKeyPEM, _ := publicKey["pem"].(string)
+	valid := canonicalSigningCryptoKey(cryptoKey, keyName) && versionOK &&
+		name == cryptoKey+"/cryptoKeyVersions/"+version &&
+		value["id"] == "//cloudkms.googleapis.com/v1/"+name &&
+		value["algorithm"] == "EC_SIGN_P256_SHA256" && value["protection_level"] == "HSM" && value["state"] == "ENABLED" &&
+		publicKeyOK && exactObjectKeys(publicKey, []string{"algorithm", "pem"}) &&
+		publicKeyAlgorithm == value["algorithm"] && validP256PublicKeyPEM(publicKeyPEM)
+	return cryptoKey, name, valid
+}
+
+func positiveJSONInteger(value any) (string, bool) {
+	number, ok := value.(float64)
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) || number < 1 || math.Trunc(number) != number || number > float64(1<<53-1) {
+		return "", false
+	}
+	return strconv.FormatFloat(number, 'f', 0, 64), true
+}
+
+func validP256PublicKeyPEM(value string) bool {
+	block, rest := pem.Decode([]byte(value))
+	if block == nil || block.Type != "PUBLIC KEY" || len(block.Headers) != 0 || strings.TrimSpace(string(rest)) != "" {
+		return false
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	publicKey, ok := parsed.(*ecdsa.PublicKey)
+	return err == nil && ok && publicKey.Curve == elliptic.P256() && publicKey.Curve.IsOnCurve(publicKey.X, publicKey.Y)
 }
 
 func exactInitialSigningVersionEnvelope(resource resourceChange, after map[string]any) bool {
@@ -6344,6 +6523,22 @@ func exactUnknownLeafSet(value any, expected []string) bool {
 	return true
 }
 
+func exactTopLevelUnknowns(value any, expected []string) bool {
+	if value == nil {
+		return len(expected) == 0
+	}
+	object, ok := value.(map[string]any)
+	if !ok || len(object) != len(expected) {
+		return false
+	}
+	for _, key := range expected {
+		if object[key] != true {
+			return false
+		}
+	}
+	return true
+}
+
 func exactStringSet(value any, expected []string) bool {
 	values, ok := value.([]any)
 	if !ok || len(values) != len(expected) {
@@ -6547,9 +6742,7 @@ func allowedUnknownSecurityValue(resource resourceChange, key string) bool {
 	if resource.Type == "google_kms_crypto_key_version" && (key == "algorithm" || key == "protection_level") {
 		if resource.Mode == "data" {
 			after, _ := resource.Change.After.(map[string]any)
-			return len(after) == 0 && exactUnknownLeafSet(resource.Change.AfterUnknown, []string{
-				"algorithm", "crypto_key", "id", "name", "protection_level", "public_key", "state", "version",
-			}) && base == "module.signing_root.data.google_kms_crypto_key_version.active"
+			return base == "module.signing_root.data.google_kms_crypto_key_version.active" && activeSigningVersionDeferredEnvelope(resource, after)
 		}
 		_, _, ok := declaredSigningVersionAddress(resource.Address, resource.signingContract)
 		return resource.Mode == "managed" && ok
