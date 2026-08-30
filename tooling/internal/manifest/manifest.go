@@ -35,7 +35,7 @@ var manifestSchemas = map[string]string{
 }
 
 var expectedFiles = []string{
-	".editorconfig", ".github/CODEOWNERS", ".github/dependabot.yml", ".github/pull_request_template.md",
+	".editorconfig", ".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
 	".gitignore", "BUILD.bazel", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "component.yaml", "flake.lock", "flake.nix", "justfile",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",

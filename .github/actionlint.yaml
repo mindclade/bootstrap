@@ -1,0 +1,4 @@
+---
+self-hosted-runner:
+  labels:
+    - mindclade-ring0-ephemeral

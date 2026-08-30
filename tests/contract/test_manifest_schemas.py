@@ -453,7 +453,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["files"], 98)
+        self.assertEqual(payload["files"], 99)
         self.assertEqual(payload["manifests"], 7)
 
     @unittest.skipIf(

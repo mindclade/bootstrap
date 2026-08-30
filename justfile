@@ -71,7 +71,7 @@ validate-tofu:
       done
 
 lint-ci:
-    actionlint -ignore 'label "mindclade-ring0-ephemeral" is unknown' .github/workflows/*.yml
+    actionlint .github/workflows/*.yml
 
 test-go:
     cd tooling && go test ./... && go vet ./...
