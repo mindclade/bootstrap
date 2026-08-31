@@ -7,13 +7,38 @@ repo_root := justfile_directory()
 default:
     @just --list
 
-fmt:
+format:
+    biome check --write .
+    ruff format .
+    cd tooling && golangci-lint fmt --config ../.golangci.yml
+    opa fmt -w policy
     tofu fmt -recursive opentofu
-    gofmt -w tooling/cmd/bootstrapctl/main.go tooling/internal/*/*.go
+    git ls-files 'BUILD.bazel' 'MODULE.bazel' '*.bzl' | xargs buildifier -mode=fix
+    nixfmt flake.nix
+    just --fmt
 
-fmt-check:
+format-check:
+    biome check .
+    ruff format --check .
+    cd tooling && golangci-lint fmt --config ../.golangci.yml --diff
+    opa fmt --fail policy >/dev/null
     tofu fmt -check -recursive opentofu
-    @unformatted="$(gofmt -l tooling/cmd/bootstrapctl/main.go tooling/internal/*/*.go)"; test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+    git ls-files 'BUILD.bazel' 'MODULE.bazel' '*.bzl' | xargs buildifier -mode=check -lint=warn
+    nixfmt --check flake.nix
+    just --fmt --check
+
+fmt: format
+
+fmt-check: format-check
+
+lint:
+    biome lint .
+    ruff check .
+    pyright
+    cd tooling && golangci-lint run --config ../.golangci.yml ./...
+    actionlint .github/workflows/*.yml
+    yamllint --config-file .yamllint.yaml .
+    markdownlint-cli2
 
 validate-manifests:
     go -C "{{ repo_root }}/tooling" run ./cmd/bootstrapctl validate --root "{{ repo_root }}"
@@ -74,7 +99,7 @@ lint-ci:
     actionlint .github/workflows/*.yml
 
 test-go:
-    cd tooling && go test ./... && go vet ./...
+    cd tooling && go test ./...
 
 test-python:
     PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
@@ -84,13 +109,18 @@ test-python:
       tests/recovery/test_isolated_restore.py
 
 test-bazel:
-    @bazel_args=(); if test -n "${BAZEL_NIX_LINKOPT:-}"; then bazel_args+=("--linkopt=${BAZEL_NIX_LINKOPT}"); fi; if test -n "${MACOSX_DEPLOYMENT_TARGET:-}"; then bazel_args+=("--repo_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--action_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--copt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" "--linkopt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"); fi; USE_BAZEL_VERSION=9.1.1 bazelisk test --lockfile_mode=off "${bazel_args[@]}" //...
+    @bazel_args=(); if test -n "${BAZEL_NIX_LINKOPT:-}"; then bazel_args+=("--linkopt=${BAZEL_NIX_LINKOPT}"); fi; if test -n "${MACOSX_DEPLOYMENT_TARGET:-}"; then bazel_args+=("--repo_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--action_env=MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}" "--copt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" "--linkopt=-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"); fi; bazel test --config=ci "${bazel_args[@]}" //...
 
 test: test-go test-python test-bazel
 
-validate: fmt-check validate-manifests validate-policy validate-tofu lint-ci test
+flake-check:
+    nix flake check --no-build --no-update-lock-file
 
-ci: validate
+check: format-check lint validate-manifests validate-policy validate-tofu test flake-check
+
+validate: check
+
+ci: check
 
 plan-check root plan_json:
     @case "{{ plan_json }}" in /*) plan_path="{{ plan_json }}" ;; *) plan_path="{{ repo_root }}/{{ plan_json }}" ;; esac; \

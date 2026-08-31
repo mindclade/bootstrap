@@ -6,39 +6,46 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
-    "kind": {"const": "BreakGlassRoleSet"},
-    "metadata": {"$ref": "#/$defs/metadata"},
+    "apiVersion": { "const": "bootstrap.mindclade.dev/v1" },
+    "kind": { "const": "BreakGlassRoleSet" },
+    "metadata": { "$ref": "#/$defs/metadata" },
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["projectRef", "location", "requesters", "approvers", "notificationRecipients", "entitlements"],
+      "required": [
+        "projectRef",
+        "location",
+        "requesters",
+        "approvers",
+        "notificationRecipients",
+        "entitlements"
+      ],
       "properties": {
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "location": {"const": "global"},
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "location": { "const": "global" },
         "requesters": {
           "type": "object",
           "minProperties": 2,
-          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
-          "additionalProperties": {"$ref": "#/$defs/envRef"}
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "additionalProperties": { "$ref": "#/$defs/envRef" }
         },
         "approvers": {
           "type": "object",
           "minProperties": 2,
-          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
-          "additionalProperties": {"$ref": "#/$defs/envRef"}
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "additionalProperties": { "$ref": "#/$defs/envRef" }
         },
         "notificationRecipients": {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
-          "additionalProperties": {"$ref": "#/$defs/envRef"}
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "additionalProperties": { "$ref": "#/$defs/envRef" }
         },
         "entitlements": {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
-          "additionalProperties": {"$ref": "#/$defs/entitlement"}
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "additionalProperties": { "$ref": "#/$defs/entitlement" }
         }
       }
     }
@@ -48,7 +55,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
-      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+      "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" } }
     },
     "envRef": {
       "type": "object",
@@ -59,7 +66,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["env"],
-          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+          "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
     },
@@ -68,7 +75,7 @@
       "additionalProperties": false,
       "required": ["targetProjectRef", "roles", "maxDurationSeconds", "approval", "standingAccess"],
       "properties": {
-        "targetProjectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "targetProjectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
         "roles": {
           "type": "array",
           "minItems": 1,
@@ -76,21 +83,21 @@
           "items": {
             "type": "string",
             "pattern": "^roles/[A-Za-z0-9_.]+$",
-            "not": {"enum": ["roles/owner", "roles/editor", "roles/viewer"]}
+            "not": { "enum": ["roles/owner", "roles/editor", "roles/viewer"] }
           }
         },
-        "maxDurationSeconds": {"type": "integer", "minimum": 1, "maximum": 7200},
+        "maxDurationSeconds": { "type": "integer", "minimum": 1, "maximum": 7200 },
         "approval": {
           "type": "object",
           "additionalProperties": false,
           "required": ["requiredApprovals", "justificationRequired", "allowSelfApproval"],
           "properties": {
-            "requiredApprovals": {"type": "integer", "minimum": 2},
-            "justificationRequired": {"const": true},
-            "allowSelfApproval": {"const": false}
+            "requiredApprovals": { "type": "integer", "minimum": 2 },
+            "justificationRequired": { "const": true },
+            "allowSelfApproval": { "const": false }
           }
         },
-        "standingAccess": {"const": false}
+        "standingAccess": { "const": false }
       }
     }
   }

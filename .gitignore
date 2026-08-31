@@ -1,6 +1,7 @@
 # Bazel outputs and generated lock state
 /bazel-*
-/MODULE.bazel.lock
+/result
+/result-*
 
 # Go and Python build products
 /tooling/bootstrapctl
@@ -35,6 +36,7 @@ application_default_credentials.json
 # Local editor and operating-system files
 .DS_Store
 .idea/
-.vscode/
 *.swp
 *~
+!.vscode/
+!.vscode/*.json

@@ -4,6 +4,7 @@ package recovery
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,20 +61,20 @@ func Verify(root string) error {
 		return fmt.Errorf("parse restore manifest: %w", err)
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return fmt.Errorf("parse restore manifest: multiple YAML documents are not allowed")
+			return errors.New("parse restore manifest: multiple YAML documents are not allowed")
 		}
 		return fmt.Errorf("parse restore manifest: %w", err)
 	}
 	if parsed.APIVersion != "bootstrap.mindclade.dev/v1" || parsed.Kind != "RestoreManifest" {
-		return fmt.Errorf("restore manifest has unsupported apiVersion/kind")
+		return errors.New("restore manifest has unsupported apiVersion/kind")
 	}
 	if parsed.Metadata.Name != "ring0-isolated-restore" || parsed.Metadata.Owner != "mindclade-security" {
-		return fmt.Errorf("restore manifest metadata must match the reviewed identity and owner")
+		return errors.New("restore manifest metadata must match the reviewed identity and owner")
 	}
 	if parsed.Spec.Primary.Backend == "" || parsed.Spec.Recovery.Backend == "" || parsed.Spec.Primary.Backend == parsed.Spec.Recovery.Backend {
-		return fmt.Errorf("primary and recovery backends must be present and distinct")
+		return errors.New("primary and recovery backends must be present and distinct")
 	}
 	for name, reference := range map[string]struct {
 		actual   string
@@ -96,7 +97,7 @@ func Verify(root string) error {
 		}
 	}
 	if parsed.Spec.Primary.ProjectRef == parsed.Spec.Recovery.ProjectRef {
-		return fmt.Errorf("primary and recovery projects must be distinct")
+		return errors.New("primary and recovery projects must be distinct")
 	}
 	expectedArtifacts := map[string]bool{
 		"RECOVERY_EVIDENCE_BUNDLE":    true,
@@ -107,10 +108,10 @@ func Verify(root string) error {
 	artifacts := map[string]bool{}
 	for _, artifact := range parsed.Spec.RequiredArtifacts {
 		if !envPattern.MatchString(artifact) {
-			return fmt.Errorf("required artifact must name a runtime environment input")
+			return errors.New("required artifact must name a runtime environment input")
 		}
 		if artifacts[artifact] {
-			return fmt.Errorf("required artifacts must be unique")
+			return errors.New("required artifacts must be unique")
 		}
 		if !expectedArtifacts[artifact] {
 			return fmt.Errorf("required artifact %s is not in the reviewed restore contract", artifact)
@@ -118,10 +119,10 @@ func Verify(root string) error {
 		artifacts[artifact] = true
 	}
 	if len(artifacts) != len(expectedArtifacts) || !parsed.Spec.Verification.RequiresIndependentOperator {
-		return fmt.Errorf("restore requires artifacts and an independent operator")
+		return errors.New("restore requires artifacts and an independent operator")
 	}
 	if parsed.Spec.Verification.MaxEvidenceAgeHours != 168 {
-		return fmt.Errorf("maxEvidenceAgeHours must equal the reviewed seven-day limit")
+		return errors.New("maxEvidenceAgeHours must equal the reviewed seven-day limit")
 	}
 	expectedDependencies := map[string]bool{
 		"application workloads": true,
@@ -135,12 +136,12 @@ func Verify(root string) error {
 			return fmt.Errorf("forbidden dependency %q is not in the reviewed restore contract", dependency)
 		}
 		if dependencies[normalized] {
-			return fmt.Errorf("forbiddenDependencies must be unique")
+			return errors.New("forbiddenDependencies must be unique")
 		}
 		dependencies[normalized] = true
 	}
 	if len(dependencies) != len(expectedDependencies) {
-		return fmt.Errorf("forbiddenDependencies must contain the exact reviewed dependency set")
+		return errors.New("forbiddenDependencies must contain the exact reviewed dependency set")
 	}
 	for _, required := range []string{
 		"independent-contact-procedure.md",

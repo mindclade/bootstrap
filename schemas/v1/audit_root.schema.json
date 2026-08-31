@@ -6,32 +6,40 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
-    "kind": {"const": "AuditRootSet"},
-    "metadata": {"$ref": "#/$defs/metadata"},
+    "apiVersion": { "const": "bootstrap.mindclade.dev/v1" },
+    "kind": { "const": "AuditRootSet" },
+    "metadata": { "$ref": "#/$defs/metadata" },
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["organization", "projectRef", "retentionDays", "lockAfterQualification", "logBuckets", "aggregatedSinks", "readers"],
+      "required": [
+        "organization",
+        "projectRef",
+        "retentionDays",
+        "lockAfterQualification",
+        "logBuckets",
+        "aggregatedSinks",
+        "readers"
+      ],
       "properties": {
-        "organization": {"$ref": "#/$defs/envRef"},
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "retentionDays": {"type": "integer", "minimum": 2555},
+        "organization": { "$ref": "#/$defs/envRef" },
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "retentionDays": { "type": "integer", "minimum": 2555 },
         "lockAfterQualification": {
           "type": "object",
           "additionalProperties": false,
           "required": ["enabled", "qualificationEvidenceRequired", "locked"],
           "properties": {
-            "enabled": {"const": true},
-            "qualificationEvidenceRequired": {"const": true},
-            "locked": {"type": "boolean"},
-            "qualificationEvidence": {"$ref": "#/$defs/qualificationEvidence"}
+            "enabled": { "const": true },
+            "qualificationEvidenceRequired": { "const": true },
+            "locked": { "type": "boolean" },
+            "qualificationEvidence": { "$ref": "#/$defs/qualificationEvidence" }
           },
           "allOf": [
             {
-              "if": {"properties": {"locked": {"const": true}}, "required": ["locked"]},
-              "then": {"required": ["qualificationEvidence"]},
-              "else": {"not": {"required": ["qualificationEvidence"]}}
+              "if": { "properties": { "locked": { "const": true } }, "required": ["locked"] },
+              "then": { "required": ["qualificationEvidence"] },
+              "else": { "not": { "required": ["qualificationEvidence"] } }
             }
           ]
         },
@@ -40,21 +48,28 @@
           "additionalProperties": false,
           "required": ["primary", "recovery"],
           "properties": {
-            "primary": {"$ref": "#/$defs/logBucket"},
-            "recovery": {"$ref": "#/$defs/logBucket"}
+            "primary": { "$ref": "#/$defs/logBucket" },
+            "recovery": { "$ref": "#/$defs/logBucket" }
           }
         },
         "aggregatedSinks": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["admin-activity", "admin-activity-recovery", "data-access", "data-access-recovery", "security-events", "security-events-recovery"],
+          "required": [
+            "admin-activity",
+            "admin-activity-recovery",
+            "data-access",
+            "data-access-recovery",
+            "security-events",
+            "security-events-recovery"
+          ],
           "properties": {
-            "admin-activity": {"$ref": "#/$defs/sink"},
-            "admin-activity-recovery": {"$ref": "#/$defs/sink"},
-            "data-access": {"$ref": "#/$defs/sink"},
-            "data-access-recovery": {"$ref": "#/$defs/sink"},
-            "security-events": {"$ref": "#/$defs/sink"},
-            "security-events-recovery": {"$ref": "#/$defs/sink"}
+            "admin-activity": { "$ref": "#/$defs/sink" },
+            "admin-activity-recovery": { "$ref": "#/$defs/sink" },
+            "data-access": { "$ref": "#/$defs/sink" },
+            "data-access-recovery": { "$ref": "#/$defs/sink" },
+            "security-events": { "$ref": "#/$defs/sink" },
+            "security-events-recovery": { "$ref": "#/$defs/sink" }
           }
         },
         "readers": {
@@ -62,8 +77,8 @@
           "additionalProperties": false,
           "required": ["security", "compliance"],
           "properties": {
-            "security": {"$ref": "#/$defs/envRef"},
-            "compliance": {"$ref": "#/$defs/envRef"}
+            "security": { "$ref": "#/$defs/envRef" },
+            "compliance": { "$ref": "#/$defs/envRef" }
           }
         }
       }
@@ -74,7 +89,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
-      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+      "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" } }
     },
     "envRef": {
       "type": "object",
@@ -85,7 +100,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["env"],
-          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+          "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
     },
@@ -94,22 +109,28 @@
       "additionalProperties": false,
       "required": ["projectRef", "bucketId", "location", "encryptionKeyName"],
       "properties": {
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "bucketId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "location": {"enum": ["us-central1", "us-east4"]},
-        "encryptionKeyName": {"$ref": "#/$defs/envRef"}
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "bucketId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "location": { "enum": ["us-central1", "us-east4"] },
+        "encryptionKeyName": { "$ref": "#/$defs/envRef" }
       }
     },
     "qualificationEvidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifactSha256", "signatureSha256", "signingKeyRef", "qualifiedSourceSha", "qualifiedAt"],
+      "required": [
+        "artifactSha256",
+        "signatureSha256",
+        "signingKeyRef",
+        "qualifiedSourceSha",
+        "qualifiedAt"
+      ],
       "properties": {
-        "artifactSha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-        "signatureSha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-        "signingKeyRef": {"type": "string", "pattern": "^audit-anchor:v[0-9]{8}$"},
-        "qualifiedSourceSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "qualifiedAt": {"type": "string", "format": "date-time", "pattern": "Z$"}
+        "artifactSha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "signatureSha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "signingKeyRef": { "type": "string", "pattern": "^audit-anchor:v[0-9]{8}$" },
+        "qualifiedSourceSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "qualifiedAt": { "type": "string", "format": "date-time", "pattern": "Z$" }
       }
     },
     "sink": {
@@ -117,10 +138,10 @@
       "additionalProperties": false,
       "required": ["sinkName", "destinationBucketRef", "includeChildren", "filter"],
       "properties": {
-        "sinkName": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "destinationBucketRef": {"enum": ["primary", "recovery"]},
-        "includeChildren": {"const": true},
-        "filter": {"type": "string", "minLength": 10, "pattern": "^[^*]+$"}
+        "sinkName": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "destinationBucketRef": { "enum": ["primary", "recovery"] },
+        "includeChildren": { "const": true },
+        "filter": { "type": "string", "minLength": 10, "pattern": "^[^*]+$" }
       }
     }
   }

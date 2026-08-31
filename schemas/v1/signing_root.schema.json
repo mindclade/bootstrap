@@ -6,34 +6,41 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
-    "kind": {"const": "SigningRootSet"},
-    "metadata": {"$ref": "#/$defs/metadata"},
+    "apiVersion": { "const": "bootstrap.mindclade.dev/v1" },
+    "kind": { "const": "SigningRootSet" },
+    "metadata": { "$ref": "#/$defs/metadata" },
     "spec": {
       "type": "object",
       "additionalProperties": false,
       "required": ["projectRef", "location", "keyRing", "administrators", "keys"],
       "properties": {
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "location": {"const": "us-central1"},
-        "keyRing": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "location": { "const": "us-central1" },
+        "keyRing": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
         "administrators": {
           "type": "array",
           "minItems": 2,
           "uniqueItems": true,
-          "items": {"$ref": "#/$defs/envRef"}
+          "items": { "$ref": "#/$defs/envRef" }
         },
         "keys": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["bootstrap-handoff", "audit-anchor", "recovery-evidence", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export"],
+          "required": [
+            "bootstrap-handoff",
+            "audit-anchor",
+            "recovery-evidence",
+            "connected-observation-evidence",
+            "github-config-plan-evidence",
+            "infrastructure-export"
+          ],
           "properties": {
-            "bootstrap-handoff": {"$ref": "#/$defs/key"},
-            "audit-anchor": {"$ref": "#/$defs/key"},
-            "recovery-evidence": {"$ref": "#/$defs/key"},
-            "connected-observation-evidence": {"$ref": "#/$defs/key"},
-            "github-config-plan-evidence": {"$ref": "#/$defs/key"},
-            "infrastructure-export": {"$ref": "#/$defs/key"}
+            "bootstrap-handoff": { "$ref": "#/$defs/key" },
+            "audit-anchor": { "$ref": "#/$defs/key" },
+            "recovery-evidence": { "$ref": "#/$defs/key" },
+            "connected-observation-evidence": { "$ref": "#/$defs/key" },
+            "github-config-plan-evidence": { "$ref": "#/$defs/key" },
+            "infrastructure-export": { "$ref": "#/$defs/key" }
           }
         }
       }
@@ -44,7 +51,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
-      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+      "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" } }
     },
     "envRef": {
       "type": "object",
@@ -55,32 +62,41 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["env"],
-          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+          "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
     },
     "key": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["purpose", "algorithm", "protectionLevel", "rotationDays", "activeVersionRef", "versions", "deletionProtection", "signers"],
+      "required": [
+        "purpose",
+        "algorithm",
+        "protectionLevel",
+        "rotationDays",
+        "activeVersionRef",
+        "versions",
+        "deletionProtection",
+        "signers"
+      ],
       "properties": {
-        "purpose": {"const": "ASYMMETRIC_SIGN"},
-        "algorithm": {"const": "EC_SIGN_P256_SHA256"},
-        "protectionLevel": {"const": "HSM"},
-        "rotationDays": {"const": 90},
-        "activeVersionRef": {"type": "string", "pattern": "^v[0-9]{8}$"},
+        "purpose": { "const": "ASYMMETRIC_SIGN" },
+        "algorithm": { "const": "EC_SIGN_P256_SHA256" },
+        "protectionLevel": { "const": "HSM" },
+        "rotationDays": { "const": 90 },
+        "activeVersionRef": { "type": "string", "pattern": "^v[0-9]{8}$" },
         "versions": {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": {"pattern": "^v[0-9]{8}$"},
-          "additionalProperties": {"$ref": "#/$defs/version"}
+          "propertyNames": { "pattern": "^v[0-9]{8}$" },
+          "additionalProperties": { "$ref": "#/$defs/version" }
         },
-        "deletionProtection": {"const": true},
+        "deletionProtection": { "const": true },
         "signers": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"$ref": "#/$defs/envRef"}
+          "items": { "$ref": "#/$defs/envRef" }
         }
       }
     },

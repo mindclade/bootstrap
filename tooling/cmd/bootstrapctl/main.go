@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -38,7 +39,7 @@ func main() {
 		err = renderVars(os.Args[2:])
 	case "source-files":
 		if len(os.Args) != 2 {
-			err = fmt.Errorf("source-files does not accept arguments")
+			err = errors.New("source-files does not accept arguments")
 			break
 		}
 		printJSON(manifest.ExpectedFiles())
@@ -55,7 +56,7 @@ func main() {
 
 func approvalCommand(args []string) error {
 	if len(args) == 0 || args[0] != "verify" {
-		return fmt.Errorf("approval requires verify")
+		return errors.New("approval requires verify")
 	}
 	flags := flag.NewFlagSet("approval verify", flag.ContinueOnError)
 	receiptPath := flags.String("receipt", "", "canonical approval receipt JSON")
@@ -74,7 +75,7 @@ func approvalCommand(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("approval verify does not accept positional arguments")
+		return errors.New("approval verify does not accept positional arguments")
 	}
 	for name, value := range map[string]string{
 		"--receipt": *receiptPath, "--public-key-1": *publicKeyOne, "--public-key-2": *publicKeyTwo,
@@ -119,10 +120,10 @@ func renderVars(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("render-vars does not accept positional arguments")
+		return errors.New("render-vars does not accept positional arguments")
 	}
 	if *composition == "" || *values == "" || *output == "" {
-		return fmt.Errorf("--composition, --values, and --output are required")
+		return errors.New("--composition, --values, and --output are required")
 	}
 	result, err := manifest.RenderVariables(*root, *composition, *values, *context, *output)
 	if err != nil {
@@ -151,7 +152,7 @@ func planCheck(args []string) error {
 		return err
 	}
 	if *path == "" || *root == "" {
-		return fmt.Errorf("--plan and --root are required")
+		return errors.New("--plan and --root are required")
 	}
 	result, err := plancheck.AnalyzeFileForRoot(*path, *root)
 	printJSON(result)
@@ -168,7 +169,7 @@ func planResourceCheck(args []string) error {
 		return err
 	}
 	if *path == "" {
-		return fmt.Errorf("--plan is required")
+		return errors.New("--plan is required")
 	}
 	result, err := plancheck.AnalyzeFile(*path)
 	printJSON(result)
@@ -188,10 +189,10 @@ func planSourceCheck(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("plan-source-check does not accept positional arguments")
+		return errors.New("plan-source-check does not accept positional arguments")
 	}
 	if *path == "" || *opentofuRoot == "" || *root == "" {
-		return fmt.Errorf("--saved-plan, --opentofu-root, and --root are required")
+		return errors.New("--saved-plan, --opentofu-root, and --root are required")
 	}
 	if err := evidence.VerifyPlanConfiguration(*path, *opentofuRoot, *providerLock, *root, *initialLocalBackend); err != nil {
 		return err
@@ -202,7 +203,7 @@ func planSourceCheck(args []string) error {
 
 func evidenceCommand(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("evidence requires create or verify")
+		return errors.New("evidence requires create or verify")
 	}
 	switch args[0] {
 	case "create":
@@ -215,7 +216,7 @@ func evidenceCommand(args []string) error {
 			return err
 		}
 		if *plan == "" || *output == "" {
-			return fmt.Errorf("--plan and --output are required")
+			return errors.New("--plan and --output are required")
 		}
 		document, err := evidence.Create(*repositoryRoot, *root, *plan, *output, time.Now())
 		printJSON(document)
@@ -229,7 +230,7 @@ func evidenceCommand(args []string) error {
 			return err
 		}
 		if *plan == "" || *evidencePath == "" {
-			return fmt.Errorf("--plan and --evidence are required")
+			return errors.New("--plan and --evidence are required")
 		}
 		document, err := evidence.Verify(*repositoryRoot, *plan, *evidencePath, time.Now())
 		printJSON(document)

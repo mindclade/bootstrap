@@ -1,12 +1,13 @@
+# pyright: basic, reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 """Tests that recovery verification is isolated from downstream control planes."""
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 
 def runfiles_source_root():
@@ -63,9 +64,7 @@ def repository_root(bootstrapctl, destination):
         or not relative_paths
         or relative_paths != sorted(set(relative_paths))
         or any(
-            not isinstance(value, str)
-            or Path(value).is_absolute()
-            or ".." in Path(value).parts
+            not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts
             for value in relative_paths
         )
     ):
@@ -124,27 +123,27 @@ class IsolatedRestoreTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('--arg mode "offline-source-simulation"', workflow)
         self.assertIn('--arg result "source-qualified"', workflow)
-        self.assertIn('name: non-qualifying-control-observation', workflow)
-        self.assertIn('group: mindclade-ring0-protected', workflow)
-        self.assertIn('mindclade-ring0-ephemeral', workflow)
-        self.assertIn('Verify the expiry-bound two-person observation approval', workflow)
-        self.assertIn('--operation recovery-observation', workflow)
+        self.assertIn("name: non-qualifying-control-observation", workflow)
+        self.assertIn("group: mindclade-ring0-protected", workflow)
+        self.assertIn("mindclade-ring0-ephemeral", workflow)
+        self.assertIn("Verify the expiry-bound two-person observation approval", workflow)
+        self.assertIn("--operation recovery-observation", workflow)
         self.assertIn('--arg mode "non-qualifying-control-observation"', workflow)
         self.assertIn('--arg result "observed-not-restored"', workflow)
-        self.assertIn('primaryReplicaExportBytesEqual: true', workflow)
-        self.assertIn('publicTrustMetadataSha256:', workflow)
-        self.assertIn('publicTrustMetadataGeneration:', workflow)
-        self.assertIn('restoreInventorySha256:', workflow)
-        self.assertIn('restoreInventoryGeneration:', workflow)
-        self.assertIn('primaryGeneration: $primaryGeneration', workflow)
-        self.assertIn('replicaGeneration: $replicaGeneration', workflow)
-        self.assertIn('exportGeneration: $exportGeneration', workflow)
+        self.assertIn("primaryReplicaExportBytesEqual: true", workflow)
+        self.assertIn("publicTrustMetadataSha256:", workflow)
+        self.assertIn("publicTrustMetadataGeneration:", workflow)
+        self.assertIn("restoreInventorySha256:", workflow)
+        self.assertIn("restoreInventoryGeneration:", workflow)
+        self.assertIn("primaryGeneration: $primaryGeneration", workflow)
+        self.assertIn("replicaGeneration: $replicaGeneration", workflow)
+        self.assertIn("exportGeneration: $exportGeneration", workflow)
         self.assertNotIn(
             'gcloud storage cat "gs://${primary_bucket}/${state_prefix}/default.tfstate"',
             workflow,
         )
         self.assertNotIn('--arg result "restored"', workflow)
-        self.assertNotIn('name: connected-read-only-verification', workflow)
+        self.assertNotIn("name: connected-read-only-verification", workflow)
 
     def test_connected_observation_and_apply_share_one_mutex(self):
         recovery_workflow = (
@@ -233,9 +232,7 @@ class IsolatedRestoreTest(unittest.TestCase):
                 ignore=shutil.ignore_patterns(".git", "bazel-*", "__pycache__", ".terraform"),
             )
             path = clone / "recovery" / "restore-manifest.yaml"
-            content = path.read_text(encoding="utf-8").replace(
-                "      - Argo CD", "      - GKE"
-            )
+            content = path.read_text(encoding="utf-8").replace("      - Argo CD", "      - GKE")
             path.write_text(content, encoding="utf-8")
             result = self.verify(clone)
             self.assertNotEqual(result.returncode, 0)

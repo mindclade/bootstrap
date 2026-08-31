@@ -1,13 +1,14 @@
+# pyright: basic, reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 """Contract tests for the exact bootstrap tree and manifest schemas."""
 
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 
 def runfiles_source_root():
@@ -64,9 +65,7 @@ def repository_root(bootstrapctl, destination):
         or not relative_paths
         or relative_paths != sorted(set(relative_paths))
         or any(
-            not isinstance(value, str)
-            or Path(value).is_absolute()
-            or ".." in Path(value).parts
+            not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts
             for value in relative_paths
         )
     ):
@@ -169,10 +168,7 @@ def valid_recovery_context(values):
                     "apply": f"{identity_provider_prefix}/bootstrap-github-apply/providers/github-actions-apply",
                     "recovery": f"{recovery_provider_prefix}/bootstrap-github-recovery/providers/github-actions-recovery",
                 },
-                "audiences": {
-                    role: "sts.googleapis.com"
-                    for role in ("plan", "apply", "recovery")
-                },
+                "audiences": dict.fromkeys(("plan", "apply", "recovery"), "sts.googleapis.com"),
             },
             "buildkite": {
                 "provider": f"{identity_provider_prefix}/bootstrap-buildkite/providers/buildkite",
@@ -206,7 +202,7 @@ def valid_recovery_context(values):
                     f"keyRings/bootstrap-signing/cryptoKeys/{name}/cryptoKeyVersions/1"
                 ),
                 "public_key_pem_sha256": hashlib.sha256(
-                    f"test-only-public-key-fixture:{name}".encode("utf-8")
+                    f"test-only-public-key-fixture:{name}".encode()
                 ).hexdigest(),
             }
             for name in (
@@ -453,7 +449,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["files"], 99)
+        self.assertEqual(payload["files"], 103)
         self.assertEqual(payload["manifests"], 7)
 
     @unittest.skipIf(
@@ -499,9 +495,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        providers = schema["properties"]["spec"]["properties"][
-            "workloadIdentityProviders"
-        ]
+        providers = schema["properties"]["spec"]["properties"]["workloadIdentityProviders"]
         self.assertIn("github-ci-evidence", providers["properties"])
         self.assertIn("github-ci-evidence", providers["required"])
         self.assertIn("github-config", providers["properties"])
@@ -511,26 +505,16 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_recovery_and_infrastructure_federation_boundaries_are_separated(self):
         module = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "main.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "main.tf"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            "pool_project_id    = var.service_account_project_ids.recovery", module
-        )
+        self.assertIn("pool_project_id    = var.service_account_project_ids.recovery", module)
         self.assertIn("project                   = each.value.pool_project_id", module)
         self.assertIn(
             'resource "google_iam_workload_identity_pool" "infrastructure_live"',
             module,
         )
-        self.assertIn(
-            '"assertion.workflow_sha == assertion.sha"', module
-        )
-        self.assertIn(
-            '"assertion.repository_visibility == \'public\'"', module
-        )
+        self.assertIn('"assertion.workflow_sha == assertion.sha"', module)
+        self.assertIn("\"assertion.repository_visibility == 'public'\"", module)
         self.assertIn('"assertion.repository ==', module)
         self.assertNotIn('"attribute.repo"', module)
         self.assertNotIn("assertion.repo ==", module)
@@ -542,27 +526,13 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_github_subject_mappings_are_bounded_and_role_separated(self):
         module = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "main.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "main.tf"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            "'bootstrap-${each.key}:' + assertion.repository_id", module
-        )
-        self.assertIn(
-            "'github-config-${each.key}:' + assertion.repository_id", module
-        )
-        self.assertIn(
-            "'infrastructure-live-${each.key}:' + assertion.repository_id", module
-        )
-        self.assertIn(
-            "'infrastructure-live-drift-plan:' + assertion.repository_id", module
-        )
-        self.assertIn(
-            "'ci-evidence-${each.key}:' + assertion.repository_id", module
-        )
+        self.assertIn("'bootstrap-${each.key}:' + assertion.repository_id", module)
+        self.assertIn("'github-config-${each.key}:' + assertion.repository_id", module)
+        self.assertIn("'infrastructure-live-${each.key}:' + assertion.repository_id", module)
+        self.assertIn("'infrastructure-live-drift-plan:' + assertion.repository_id", module)
+        self.assertIn("'ci-evidence-${each.key}:' + assertion.repository_id", module)
         self.assertNotIn('= "assertion.sub"', module)
 
         bootstrap_repository = "1350991612"
@@ -630,9 +600,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
             'resource "google_service_account" "github_config"',
             1,
         )[0]
-        github_config_mapping = github_config_provider.split(
-            "attribute_mapping = {", 1
-        )[1].split("\n  }\n\n  attribute_condition", 1)[0]
+        github_config_mapping = github_config_provider.split("attribute_mapping = {", 1)[1].split(
+            "\n  }\n\n  attribute_condition", 1
+        )[0]
         self.assertIn('"attribute.ref"', github_config_mapping)
         self.assertNotIn('"attribute.environment"', github_config_mapping)
         self.assertNotIn("assertion.environment", github_config_mapping)
@@ -640,19 +610,12 @@ class ManifestSchemaContractTest(unittest.TestCase):
             '"attribute.github_config_identity" = "\'${each.key}\'"',
             github_config_mapping,
         )
-        self.assertIn(
-            "/attribute.github_config_identity/${each.key}", module
-        )
-        self.assertNotIn(
-            "/attribute.repository_id/${var.github_config.repository_id}", module
-        )
+        self.assertIn("/attribute.github_config_identity/${each.key}", module)
+        self.assertNotIn("/attribute.repository_id/${var.github_config.repository_id}", module)
 
     def test_recovery_audience_preflight_accepts_exact_provider_audience(self):
         workflow = (
-            self.repository_root
-            / ".github"
-            / "workflows"
-            / "recovery-verification.yml"
+            self.repository_root / ".github" / "workflows" / "recovery-verification.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
             '[[ "${WIF_AUDIENCE}" == "sts.googleapis.com" ]]',
@@ -663,11 +626,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_github_provider_display_names_fit_google_api_limits(self):
         module = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "main.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "main.tf"
         ).read_text(encoding="utf-8")
         self.assertIn('display_name                       = "infra-live ${each.key}"', module)
         self.assertNotIn(
@@ -742,7 +701,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertIn('version     = "7.42.0"', content)
         self.assertIn('exclude = ["hashicorp/google"]', justfile)
         self.assertNotIn('exclude = ["hashicorp/google"]', workflow)
-        self.assertGreaterEqual(workflow.count("Prepare the exact reviewed Google provider package"), 2)
+        self.assertGreaterEqual(
+            workflow.count("Prepare the exact reviewed Google provider package"), 2
+        )
 
     def test_protected_apply_uses_hardened_plan_transport_and_terminal_checks(self):
         workflow = (
@@ -752,21 +713,15 @@ class ManifestSchemaContractTest(unittest.TestCase):
             "run-name: protected-${{ inputs.operation }} / ${{ inputs.root }} / ${{ inputs.source_sha }}",
             workflow,
         )
-        self.assertGreaterEqual(
-            workflow.count('test "${REPOSITORY_VISIBILITY}" = "private"'), 2
-        )
+        self.assertGreaterEqual(workflow.count('test "${REPOSITORY_VISIBILITY}" = "private"'), 2)
         self.assertGreaterEqual(workflow.count(".protected == true"), 3)
         self.assertIn('.name == "required"', workflow)
-        self.assertIn(
-            "artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}", workflow
-        )
+        self.assertIn("artifact-ids: ${{ steps.plan_artifact.outputs.artifact_id }}", workflow)
         self.assertIn("digest-mismatch: error", workflow)
         self.assertIn("PLAN_ARTIFACT_DIGEST", workflow)
-        self.assertIn("find \"${bundle}\" -mindepth 1 -maxdepth 1 -printf", workflow)
+        self.assertIn('find "${bundle}" -mindepth 1 -maxdepth 1 -printf', workflow)
         self.assertNotIn("\\n  direct {\\n", workflow)
-        self.assertGreaterEqual(
-            workflow.count('"${RUNNER_TEMP}/bootstrapctl" approval verify'), 2
-        )
+        self.assertGreaterEqual(workflow.count('"${RUNNER_TEMP}/bootstrapctl" approval verify'), 2)
         self.assertIn("Remove plan credentials before artifact publication", workflow)
         self.assertIn("Remove apply credentials and generated runtime files", workflow)
 
@@ -818,22 +773,14 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_ci_evidence_federation_is_founder_bootstrapped_isolated_and_keyless(self):
         module = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "main.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "main.tf"
         ).read_text(encoding="utf-8")
         variables = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "variables.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "variables.tf"
         ).read_text(encoding="utf-8")
-        manifest = (
-            self.repository_root / "manifests" / "identity-federation.yaml"
-        ).read_text(encoding="utf-8")
+        manifest = (self.repository_root / "manifests" / "identity-federation.yaml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("state: FOUNDER_BOOTSTRAPPED", manifest)
         self.assertIn("exceptionRef: FBE-0001", manifest)
         self.assertIn('pool_id == "github-ci-evidence"', variables)
@@ -842,9 +789,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
             "local.connected_federation_state && var.ci_evidence.activation_enabled ? local.ci_evidence_identities : {}",
             module,
         )
-        self.assertIn(
-            "if contains(var.activation.active_subject_ids, subject.id)", module
-        )
+        self.assertIn("if contains(var.activation.active_subject_ids, subject.id)", module)
         self.assertIn(
             'service_account_id = "projects/${var.project_id}/serviceAccounts/${each.value.service_email}"',
             module,
@@ -860,11 +805,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         self.assertNotIn("var.ci_evidence.writer.audience", module)
         self.assertNotIn("var.ci_evidence.verifier.audience", module)
         outputs = (
-            self.repository_root
-            / "opentofu"
-            / "modules"
-            / "github-federation"
-            / "outputs.tf"
+            self.repository_root / "opentofu" / "modules" / "github-federation" / "outputs.tf"
         ).read_text(encoding="utf-8")
         self.assertIn('key => "https://iam.googleapis.com/${provider.name}"', outputs)
         self.assertNotIn("google_service_account_key", module)
@@ -888,9 +829,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
     def test_source_qualification_installs_exact_hash_verified_just(self):
         checksum = "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
         for name in ("recovery-verification.yml",):
-            workflow = (
-                self.repository_root / ".github" / "workflows" / name
-            ).read_text(encoding="utf-8")
+            workflow = (self.repository_root / ".github" / "workflows" / name).read_text(
+                encoding="utf-8"
+            )
             self.assertIn('JUST_VERSION: "1.58.0"', workflow)
             self.assertIn(checksum, workflow)
             self.assertIn("just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz", workflow)
@@ -898,9 +839,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertIn('= "just ${JUST_VERSION}"', workflow)
 
     def test_pull_request_qualification_uses_the_locked_nix_contract(self):
-        workflow = (
-            self.repository_root / ".github" / "workflows" / "pull-request.yml"
-        ).read_text(encoding="utf-8")
+        workflow = (self.repository_root / ".github" / "workflows" / "pull-request.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(
             "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
             workflow,
@@ -1002,7 +943,10 @@ class ManifestSchemaContractTest(unittest.TestCase):
             ),
         )
         for path_name, original, replacement, diagnostic in cases:
-            with self.subTest(path=path_name, mutation=replacement), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(path=path_name, mutation=replacement),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 clone = Path(directory) / "bootstrap"
                 shutil.copytree(
                     self.repository_root,
@@ -1030,7 +974,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 ),
             )
             path = clone / "manifests" / "trust-anchors.yaml"
-            path.write_text(path.read_text(encoding="utf-8") + "\nunapprovedField: true\n", encoding="utf-8")
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\nunapprovedField: true\n", encoding="utf-8"
+            )
             result = self.validate(clone)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("validate manifests/trust-anchors.yaml", result.stderr)
@@ -1048,7 +994,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
             path = clone / "manifests" / "recovery-policy.yaml"
             content = path.read_text(encoding="utf-8")
             path.write_text(
-                content.replace("recoveryBackendRef: recovery-plane", "recoveryBackendRef: missing-backend"),
+                content.replace(
+                    "recoveryBackendRef: recovery-plane", "recoveryBackendRef: missing-backend"
+                ),
                 encoding="utf-8",
             )
             result = self.validate(clone)
@@ -1261,7 +1209,9 @@ class ManifestSchemaContractTest(unittest.TestCase):
             )
             path = clone / "manifests" / "audit-roots.yaml"
             original = path.read_text(encoding="utf-8")
-            path.write_text(original.replace("    locked: false", "    locked: true"), encoding="utf-8")
+            path.write_text(
+                original.replace("    locked: false", "    locked: true"), encoding="utf-8"
+            )
             result = self.validate(clone)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("qualificationEvidence", result.stderr)
@@ -1405,10 +1355,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                {
-                    identity["audience"]
-                    for identity in infrastructure["identities"].values()
-                },
+                {identity["audience"] for identity in infrastructure["identities"].values()},
                 {
                     f"https://github.mindclade.io/oidc/infrastructure-live/{environment}/{role}"
                     for environment in (
@@ -1422,12 +1369,8 @@ class ManifestSchemaContractTest(unittest.TestCase):
             )
             self.assertNotIn("WORKFORCE_OIDC_CLIENT_SECRET", first_bytes.decode("utf-8"))
             self.assertNotIn("client_secret", first_payload["bootstrap"]["workforce"])
-            self.assertFalse(
-                first_payload["bootstrap"]["audit"]["lock_after_qualification"]
-            )
-            self.assertIsNone(
-                first_payload["bootstrap"]["audit"]["qualification_evidence"]
-            )
+            self.assertFalse(first_payload["bootstrap"]["audit"]["lock_after_qualification"])
+            self.assertIsNone(first_payload["bootstrap"]["audit"]["qualification_evidence"])
             signing_key = first_payload["bootstrap"]["signing"]["keys"]["audit-anchor"]
             self.assertEqual(signing_key["active_version_ref"], "v20260829")
             self.assertEqual(
@@ -1470,8 +1413,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                set(activation["active_subject_ids"])
-                | set(activation["gated_subject_ids"]),
+                set(activation["active_subject_ids"]) | set(activation["gated_subject_ids"]),
                 {
                     "github-config-drift-plan",
                     "github-config-protected-plan",
@@ -1494,11 +1436,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 },
             )
             signing_outputs = (
-                self.repository_root
-                / "opentofu"
-                / "modules"
-                / "signing-root"
-                / "outputs.tf"
+                self.repository_root / "opentofu" / "modules" / "signing-root" / "outputs.tf"
             ).read_text(encoding="utf-8")
             self.assertIn("public_key_pem", signing_outputs)
             self.assertIn("public_key_pem_sha256", signing_outputs)
@@ -1571,7 +1509,10 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "must be distinct from root, security, and signing principals",
             ),
         ):
-            with self.subTest(principal=invalid_principal), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(principal=invalid_principal),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 values = valid_render_values()
                 values["RECOVERY_ADMIN_GROUP"] = invalid_principal
                 result, output = self.render_root(directory, values)
@@ -1590,7 +1531,10 @@ class ManifestSchemaContractTest(unittest.TestCase):
 
     def test_root_trust_render_rejects_whitespace_values(self):
         for invalid_value in (" ", " audience-with-surrounding-space "):
-            with self.subTest(value=repr(invalid_value)), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(value=repr(invalid_value)),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 values = valid_render_values()
                 values["GITOPS_OIDC_AUDIENCE"] = invalid_value
                 result, output = self.render_root(directory, values)
@@ -1615,9 +1559,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
     def test_root_trust_render_requires_canonical_gitops_identity(self):
         invalid_values = {
             "GITOPS_REPOSITORY": "mindclade/platform-gitops",
-            "GITOPS_IMMUTABLE_SUBJECT": (
-                "repo:mindclade/platform-gitops:ref:refs/heads/main"
-            ),
+            "GITOPS_IMMUTABLE_SUBJECT": ("repo:mindclade/platform-gitops:ref:refs/heads/main"),
         }
         for name, invalid_value in invalid_values.items():
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
@@ -1769,12 +1711,10 @@ class ManifestSchemaContractTest(unittest.TestCase):
         identity_number = context["federation"]["github"]["providers"]["plan"].split("/")[1]
         recovery_provider = context["federation"]["github"]["providers"]["recovery"]
         recovery_number = recovery_provider.split("/")[1]
-        context["federation"]["github"]["providers"]["recovery"] = (
-            recovery_provider.replace(
-                f"projects/{recovery_number}/",
-                f"projects/{identity_number}/",
-                1,
-            )
+        context["federation"]["github"]["providers"]["recovery"] = recovery_provider.replace(
+            f"projects/{recovery_number}/",
+            f"projects/{identity_number}/",
+            1,
         )
         with tempfile.TemporaryDirectory() as directory:
             result, output = self.render_recovery(directory, values, context)

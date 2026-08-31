@@ -6,38 +6,56 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
-    "kind": {"const": "RecoveryPolicy"},
-    "metadata": {"$ref": "#/$defs/metadata"},
+    "apiVersion": { "const": "bootstrap.mindclade.dev/v1" },
+    "kind": { "const": "RecoveryPolicy" },
+    "metadata": { "$ref": "#/$defs/metadata" },
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["primaryRegion", "recoveryRegion", "rootTrustBackendRef", "recoveryBackendRef", "signingRootRef", "restoreManifestPath", "objectives", "exports", "evidence", "drills", "isolation", "independentContacts"],
+      "required": [
+        "primaryRegion",
+        "recoveryRegion",
+        "rootTrustBackendRef",
+        "recoveryBackendRef",
+        "signingRootRef",
+        "restoreManifestPath",
+        "objectives",
+        "exports",
+        "evidence",
+        "drills",
+        "isolation",
+        "independentContacts"
+      ],
       "properties": {
-        "primaryRegion": {"const": "us-central1"},
-        "recoveryRegion": {"const": "us-east4"},
-        "rootTrustBackendRef": {"const": "root-trust"},
-        "recoveryBackendRef": {"const": "recovery-plane"},
-        "signingRootRef": {"const": "recovery-evidence"},
-        "restoreManifestPath": {"const": "recovery/restore-manifest.yaml"},
+        "primaryRegion": { "const": "us-central1" },
+        "recoveryRegion": { "const": "us-east4" },
+        "rootTrustBackendRef": { "const": "root-trust" },
+        "recoveryBackendRef": { "const": "recovery-plane" },
+        "signingRootRef": { "const": "recovery-evidence" },
+        "restoreManifestPath": { "const": "recovery/restore-manifest.yaml" },
         "objectives": {
           "type": "object",
           "additionalProperties": false,
           "required": ["recoveryPointHours", "recoveryTimeHours"],
           "properties": {
-            "recoveryPointHours": {"type": "integer", "minimum": 1, "maximum": 24},
-            "recoveryTimeHours": {"type": "integer", "minimum": 1, "maximum": 8}
+            "recoveryPointHours": { "type": "integer", "minimum": 1, "maximum": 24 },
+            "recoveryTimeHours": { "type": "integer", "minimum": 1, "maximum": 8 }
           }
         },
         "exports": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minimumRetainedStateGenerations", "encryptionKeyName", "includePublicTrustMetadata", "includePrivateKeyMaterial"],
+          "required": [
+            "minimumRetainedStateGenerations",
+            "encryptionKeyName",
+            "includePublicTrustMetadata",
+            "includePrivateKeyMaterial"
+          ],
           "properties": {
-            "minimumRetainedStateGenerations": {"type": "integer", "minimum": 3},
-            "encryptionKeyName": {"$ref": "#/$defs/envRef"},
-            "includePublicTrustMetadata": {"const": true},
-            "includePrivateKeyMaterial": {"const": false}
+            "minimumRetainedStateGenerations": { "type": "integer", "minimum": 3 },
+            "encryptionKeyName": { "$ref": "#/$defs/envRef" },
+            "includePublicTrustMetadata": { "const": true },
+            "includePrivateKeyMaterial": { "const": false }
           }
         },
         "evidence": {
@@ -45,9 +63,9 @@
           "additionalProperties": false,
           "required": ["maximumAgeHours", "signatureAlgorithm", "requireManifestDigest"],
           "properties": {
-            "maximumAgeHours": {"type": "integer", "minimum": 1, "maximum": 2190},
-            "signatureAlgorithm": {"const": "EC_SIGN_P256_SHA256"},
-            "requireManifestDigest": {"const": true}
+            "maximumAgeHours": { "type": "integer", "minimum": 1, "maximum": 2190 },
+            "signatureAlgorithm": { "const": "EC_SIGN_P256_SHA256" },
+            "requireManifestDigest": { "const": true }
           }
         },
         "drills": {
@@ -55,28 +73,33 @@
           "additionalProperties": false,
           "required": ["cadence", "offlineByDefault", "connectedMode", "evidenceRetentionDays"],
           "properties": {
-            "cadence": {"const": "quarterly"},
-            "offlineByDefault": {"const": true},
-            "connectedMode": {"const": "read-only"},
-            "evidenceRetentionDays": {"type": "integer", "minimum": 2555}
+            "cadence": { "const": "quarterly" },
+            "offlineByDefault": { "const": true },
+            "connectedMode": { "const": "read-only" },
+            "evidenceRetentionDays": { "type": "integer", "minimum": 2555 }
           }
         },
         "isolation": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["required", "denyPrimaryPlaneDependencies", "networkIsolationRequired", "recoveryAdministrator"],
+          "required": [
+            "required",
+            "denyPrimaryPlaneDependencies",
+            "networkIsolationRequired",
+            "recoveryAdministrator"
+          ],
           "properties": {
-            "required": {"const": true},
-            "denyPrimaryPlaneDependencies": {"const": true},
-            "networkIsolationRequired": {"const": true},
-            "recoveryAdministrator": {"$ref": "#/$defs/envRef"}
+            "required": { "const": true },
+            "denyPrimaryPlaneDependencies": { "const": true },
+            "networkIsolationRequired": { "const": true },
+            "recoveryAdministrator": { "$ref": "#/$defs/envRef" }
           }
         },
         "independentContacts": {
           "type": "object",
           "minProperties": 2,
-          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{1,62}$"},
-          "additionalProperties": {"$ref": "#/$defs/envRef"}
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "additionalProperties": { "$ref": "#/$defs/envRef" }
         }
       }
     }
@@ -86,7 +109,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
-      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+      "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" } }
     },
     "envRef": {
       "type": "object",
@@ -97,7 +120,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["env"],
-          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+          "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
     }

@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -924,7 +925,8 @@ func validateSigningDeclarationOutput(outputs map[string]struct {
 	Before       any      `json:"before"`
 	After        any      `json:"after"`
 	AfterUnknown any      `json:"after_unknown"`
-}, contract *signingContract, violations *[]string) {
+}, contract *signingContract, violations *[]string,
+) {
 	output, present := outputs["signing_version_declarations"]
 	if !present || contract == nil {
 		*violations = append(*violations, "root-trust plan must contain the append-only signing_version_declarations output")
@@ -1022,10 +1024,10 @@ func Analyze(data []byte) (Summary, error) {
 		return Summary{}, fmt.Errorf("parse OpenTofu plan JSON: %w", err)
 	}
 	if parsed.ResourceChanges == nil {
-		return Summary{}, fmt.Errorf("parse OpenTofu plan JSON: resource_changes must be an array")
+		return Summary{}, errors.New("parse OpenTofu plan JSON: resource_changes must be an array")
 	}
 	if parsed.FormatVersion != "1.2" || parsed.TerraformVersion != "1.12.6" {
-		return Summary{}, fmt.Errorf("parse OpenTofu plan JSON: unsupported or incomplete plan format metadata")
+		return Summary{}, errors.New("parse OpenTofu plan JSON: unsupported or incomplete plan format metadata")
 	}
 	contract, present, contractError := signingContractFromVariables(parsed.Variables)
 	var result Summary
@@ -1380,7 +1382,7 @@ func validateKMSParentAndBucketGraph(resources []resourceChange, violations *[]s
 		bucketAfter, _ := bucketResource.Change.After.(map[string]any)
 		keyAfter, _ := keyResource.Change.After.(map[string]any)
 		expectedKey := canonicalKMSCryptoKeyFromAfter(keyAfter)
-		actualKey := ""
+		var actualKey string
 		if pair.logging {
 			actualKey = nestedString(bucketAfter["cmek_settings"], "kms_key_name")
 		} else {
@@ -1460,14 +1462,15 @@ func exactSigningVersionInventory(resources []resourceChange, contract *signingC
 
 func signingContractFromVariables(variables map[string]struct {
 	Value any `json:"value"`
-}) (*signingContract, bool, error) {
+},
+) (*signingContract, bool, error) {
 	variable, present := variables["bootstrap"]
 	if !present {
 		return nil, false, nil
 	}
 	bootstrap, ok := variable.Value.(map[string]any)
 	if !ok {
-		return nil, true, fmt.Errorf("bootstrap must be an object")
+		return nil, true, errors.New("bootstrap must be an object")
 	}
 	signing, _ := bootstrap["signing"].(map[string]any)
 	keys, _ := signing["keys"].(map[string]any)
@@ -1536,7 +1539,8 @@ func defaultSigningContract() *signingContract {
 
 func auditLockContractFromVariables(variables map[string]struct {
 	Value any `json:"value"`
-}, signing *signingContract) (auditLockContract, error) {
+}, signing *signingContract,
+) (auditLockContract, error) {
 	bootstrapVariable, present := variables["bootstrap"]
 	if !present {
 		return auditLockContract{}, nil
@@ -1548,18 +1552,18 @@ func auditLockContractFromVariables(variables map[string]struct {
 	}
 	locked, ok := audit["lock_after_qualification"].(bool)
 	if !ok {
-		return auditLockContract{declared: true}, fmt.Errorf("audit.lock_after_qualification must be boolean")
+		return auditLockContract{declared: true}, errors.New("audit.lock_after_qualification must be boolean")
 	}
 	evidence := audit["qualification_evidence"]
 	if !locked {
 		if !plannedUnset(evidence) {
-			return auditLockContract{declared: true}, fmt.Errorf("qualification evidence must be null until locking is declared")
+			return auditLockContract{declared: true}, errors.New("qualification evidence must be null until locking is declared")
 		}
 		return auditLockContract{declared: true}, nil
 	}
 	object, ok := evidence.(map[string]any)
 	if !ok || !exactObjectKeys(object, []string{"artifact_sha256", "signature_sha256", "signing_key_ref", "qualified_source_sha", "qualified_at"}) {
-		return auditLockContract{declared: true, locked: true}, fmt.Errorf("locked audit retention requires the exact qualification-evidence object")
+		return auditLockContract{declared: true, locked: true}, errors.New("locked audit retention requires the exact qualification-evidence object")
 	}
 	sha256Pattern := regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	gitSHA, _ := object["qualified_source_sha"].(string)
@@ -1574,7 +1578,7 @@ func auditLockContractFromVariables(variables map[string]struct {
 		!regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(gitSHA) || qualifiedError != nil ||
 		qualifiedAt != qualifiedTime.UTC().Format("2006-01-02T15:04:05Z") ||
 		object["signing_key_ref"] != "audit-anchor:"+activeAuditRef {
-		return auditLockContract{declared: true, locked: true}, fmt.Errorf("qualification evidence must bind exact digests, source, UTC time, and active audit-anchor")
+		return auditLockContract{declared: true, locked: true}, errors.New("qualification evidence must bind exact digests, source, UTC time, and active audit-anchor")
 	}
 	return auditLockContract{declared: true, locked: true}, nil
 }
@@ -1718,7 +1722,7 @@ func validateCompositionCompleteness(resources []resourceChange, root string, si
 	}
 	for address, count := range seenAddresses {
 		if count != 1 {
-			*violations = append(*violations, fmt.Sprintf("%s must occur exactly once in the planned composition", address))
+			*violations = append(*violations, address+" must occur exactly once in the planned composition")
 		}
 	}
 
@@ -2848,9 +2852,7 @@ func validatePlannedProjectGraph(resources []resourceChange, violations *[]strin
 }
 
 func validateStateBackendProject(resource resourceChange, after map[string]any, projects map[string]string, violations *[]string) {
-	module := ""
-	primaryLogical := ""
-	replicaLogical := ""
+	var module, primaryLogical, replicaLogical string
 	if strings.HasPrefix(resource.Address, "module.root_state.") {
 		module, primaryLogical, replicaLogical = "module.root_state", "root_state", "recovery"
 	} else if strings.HasPrefix(resource.Address, "module.recovery_state.") {
@@ -3272,7 +3274,7 @@ func inspectUnknown(value any, path string, resource resourceChange, violations 
 			requiresApproval := securityRelevantField(lower) ||
 				(resource.Type == "google_storage_transfer_job" && transferOutputField(lower))
 			if requiresApproval && containsUnknown(child) && !allowedUnknownSecurityValue(resource, lower) {
-				*violations = append(*violations, fmt.Sprintf("%s contains an unknown security-relevant planned value", childPath))
+				*violations = append(*violations, childPath+" contains an unknown security-relevant planned value")
 			}
 			inspectUnknown(child, childPath, resource, violations)
 		}
@@ -3330,7 +3332,7 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 			*violations = append(*violations, resource.Address+" must enable bucket versioning")
 		}
 		if nestedString(after["encryption"], "default_kms_key_name") == "" &&
-			!(approvedUnknownBucketCMEK(resource) && nestedUnknown(resource.Change.AfterUnknown, "encryption", "default_kms_key_name")) {
+			(!approvedUnknownBucketCMEK(resource) || !nestedUnknown(resource.Change.AfterUnknown, "encryption", "default_kms_key_name")) {
 			*violations = append(*violations, resource.Address+" must use a default CMEK")
 		}
 		if nestedNumber(after["soft_delete_policy"], "retention_duration_seconds") < 2592000 {
@@ -3679,18 +3681,19 @@ func validateIdentityPoolContract(resource resourceChange, after map[string]any,
 		if index := strings.IndexByte(base, '['); index >= 0 {
 			base = base[:index]
 		}
-		if base == "module.github_federation.google_iam_workload_identity_pool.github" {
+		switch base {
+		case "module.github_federation.google_iam_workload_identity_pool.github":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-github-"+instance, resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool.ci_evidence" {
+		case "module.github_federation.google_iam_workload_identity_pool.ci_evidence":
 			requireEqual(after, "workload_identity_pool_id", "github-ci-evidence", resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool.github_config" {
+		case "module.github_federation.google_iam_workload_identity_pool.github_config":
 			requireEqual(after, "workload_identity_pool_id", "github-config", resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool.infrastructure_live" {
+		case "module.github_federation.google_iam_workload_identity_pool.infrastructure_live":
 			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
-		} else if base == "module.buildkite_federation.google_iam_workload_identity_pool.buildkite" {
+		case "module.buildkite_federation.google_iam_workload_identity_pool.buildkite":
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-buildkite", resource.Address, violations)
-		} else if base == "module.gitops_federation.google_iam_workload_identity_pool.gitops" {
+		case "module.gitops_federation.google_iam_workload_identity_pool.gitops":
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-gitops", resource.Address, violations)
 		}
 		return
@@ -3717,29 +3720,30 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 		if index := strings.IndexByte(base, '['); index >= 0 {
 			base = base[:index]
 		}
-		if base == "module.github_federation.google_iam_workload_identity_pool_provider.github" {
+		switch base {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.github":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-github-"+instance, resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "github-actions-"+instance, resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "github-ci-evidence", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", instance, resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.github_config":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "github-config", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "github-config-"+instance, resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live":
 			instance, _, _ := terraformAddressStringIndex(resource.Address, base)
 			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", instance, resource.Address, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift":
 			requireEqual(after, "workload_identity_pool_id", "infrastructure-live", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "infrastructure-plan", resource.Address, violations)
-		} else if base == "module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite" {
+		case "module.buildkite_federation.google_iam_workload_identity_pool_provider.buildkite":
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-buildkite", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "buildkite", resource.Address, violations)
-		} else if base == "module.gitops_federation.google_iam_workload_identity_pool_provider.gitops" {
+		case "module.gitops_federation.google_iam_workload_identity_pool_provider.gitops":
 			requireEqual(after, "workload_identity_pool_id", "bootstrap-gitops", resource.Address, violations)
 			requireEqual(after, "workload_identity_pool_provider_id", "gitops", resource.Address, violations)
 		}
@@ -3763,15 +3767,16 @@ func validateIdentityProviderContract(resource resourceChange, after map[string]
 				*violations = append(*violations, resource.Address+" GitOps issuer must use HTTPS")
 			}
 		}
-		if base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" {
+		switch base {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence":
 			validateCIEvidenceProviderClaims(resource, after, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.github_config" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.github_config":
 			validateGithubConfigProviderClaims(resource, after, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_live":
 			validateInfrastructureProviderClaims(resource, after, violations)
-		} else if base == "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift" {
+		case "module.github_federation.google_iam_workload_identity_pool_provider.infrastructure_drift":
 			validateInfrastructureDriftProviderClaims(resource, after, violations)
-		} else {
+		default:
 			validateWorkloadProviderClaims(resource, after, base, violations)
 		}
 		return
@@ -3883,14 +3888,15 @@ func githubConfigProviderConditionForSubjects(instance string, activeSubjects ma
 		}, " && ") + ")"
 	}
 	conditions := []string{}
-	if instance == "plan" {
+	switch instance {
+	case "plan":
 		if activeSubjects == nil || activeSubjects["github-config-drift-plan"] {
 			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/drift-detection.yml@refs/heads/main", "ref", "refs/heads/main"))
 		}
 		if activeSubjects == nil || activeSubjects["github-config-protected-plan"] {
 			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "trusted-build"))
 		}
-	} else if instance == "apply" {
+	case "apply":
 		if activeSubjects == nil || activeSubjects["github-config-protected-apply"] {
 			conditions = append(conditions, subject("mindclade/github-config/.github/workflows/protected-apply.yml@refs/heads/main", "environment", "infrastructure-apply"))
 		}
@@ -4147,10 +4153,7 @@ func validateFederationClaimGraph(resources []resourceChange, violations *[]stri
 		if index := strings.IndexByte(base, '['); index >= 0 {
 			base = base[:index]
 		}
-		providerKey := ""
-		poolID := ""
-		attribute := ""
-		claim := ""
+		var providerKey, poolID, attribute, claim string
 		switch base {
 		case "module.github_federation.google_service_account_iam_member.github":
 			instance, indexed, _ := terraformAddressStringIndex(resource.Address, base)
@@ -4640,11 +4643,12 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 			*violations = append(*violations, resource.Address+" must bind only its "+principalDescription)
 		}
 		customRoleID := ""
-		if base == "google_organization_iam_member.plan_read" {
+		switch base {
+		case "google_organization_iam_member.plan_read":
 			customRoleID = organizationPlanReadRoleContract.roleID
-		} else if base == "google_organization_iam_member.recovery_sink_read" {
+		case "google_organization_iam_member.recovery_sink_read":
 			customRoleID = recoverySinkReadRoleContract.roleID
-		} else if base == "google_organization_iam_member.apply_iam" {
+		case "google_organization_iam_member.apply_iam":
 			customRoleID = organizationIAMApplyRoleContract.roleID
 		}
 		if customRoleID != "" && role != fmt.Sprintf("organizations/%s/roles/%s", orgID, customRoleID) {
@@ -4758,11 +4762,12 @@ func validateIndexedIAMAddressContract(resource resourceChange, after map[string
 func validateFederationServiceAccountBinding(resource resourceChange, after map[string]any, instance string, indexed bool, attribute string, violations *[]string) {
 	expectedAccountID := instance
 	base := resourceAddressBase(resource.Address)
-	if base == "module.github_federation.google_service_account_iam_member.github" {
+	switch base {
+	case "module.github_federation.google_service_account_iam_member.github":
 		expectedAccountID = map[string]string{"plan": "bootstrap-plan", "apply": "bootstrap-apply", "recovery": "bootstrap-recovery"}[instance]
-	} else if base == "module.github_federation.google_service_account_iam_member.ci_evidence" {
+	case "module.github_federation.google_service_account_iam_member.ci_evidence":
 		expectedAccountID = map[string]string{"writer": "ci-evidence-writer", "verifier": "ci-evidence-verifier"}[instance]
-	} else if base == "module.github_federation.google_service_account_iam_member.github_config" {
+	case "module.github_federation.google_service_account_iam_member.github_config":
 		expectedAccountID = map[string]string{"plan": "github-config-plan", "apply": "github-config-apply"}[instance]
 	}
 	serviceAccountID, _ := after["service_account_id"].(string)
@@ -6229,7 +6234,8 @@ func validP256PublicKeyPEM(value string) bool {
 	}
 	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
 	publicKey, ok := parsed.(*ecdsa.PublicKey)
-	return err == nil && ok && publicKey.Curve == elliptic.P256() && publicKey.Curve.IsOnCurve(publicKey.X, publicKey.Y)
+	// ParsePKIXPublicKey rejects points outside the declared curve.
+	return err == nil && ok && publicKey.Curve == elliptic.P256()
 }
 
 func exactInitialSigningVersionEnvelope(resource resourceChange, after map[string]any) bool {

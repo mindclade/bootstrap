@@ -4,6 +4,7 @@ package evidence
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -11,8 +12,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	archivepath "path"
@@ -82,14 +85,14 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 		return fmt.Errorf("unsupported Ring-0 composition %q", rootName)
 	}
 	if initialLocalBackend && rootName != "root-trust" {
-		return fmt.Errorf("initial local-backend mode is permitted only for root-trust")
+		return errors.New("initial local-backend mode is permitted only for root-trust")
 	}
 	rootInfo, err := os.Lstat(opentofuRoot)
 	if err != nil {
 		return fmt.Errorf("inspect OpenTofu source root: %w", err)
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-		return fmt.Errorf("OpenTofu source root must be a real directory, not a symlink")
+		return errors.New("OpenTofu source root must be a real directory, not a symlink")
 	}
 
 	expectedConfiguration := map[string][]byte{}
@@ -110,14 +113,14 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 			}
 		}
 		directory := filepath.Join(opentofuRoot, filepath.FromSlash(contract.sourceFolder))
-		if err := requireExactConfigurationFiles(directory, sourceFiles); err != nil {
-			return err
+		if validationErr := requireExactConfigurationFiles(directory, sourceFiles); validationErr != nil {
+			return validationErr
 		}
 		for _, name := range archiveFiles {
 			sourcePath := filepath.Join(directory, name)
-			content, err := readRegularFile(sourcePath, maxArchivedConfigurationBytes)
-			if err != nil {
-				return err
+			content, readErr := readRegularFile(sourcePath, maxArchivedConfigurationBytes)
+			if readErr != nil {
+				return readErr
 			}
 			expectedConfiguration["tfconfig/m-"+key+"/"+name] = content
 		}
@@ -135,7 +138,7 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 	if err != nil {
 		return fmt.Errorf("open saved plan as the pinned OpenTofu archive format: %w", err)
 	}
-	defer archive.Close()
+	defer func() { _ = archive.Close() }()
 	expectedEntryCount := len(expectedConfiguration) + 5
 	if len(archive.File) != expectedEntryCount {
 		return fmt.Errorf("saved plan archive must contain exactly %d entries, found %d", expectedEntryCount, len(archive.File))
@@ -152,10 +155,10 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 		name := entry.Name
 		if name == "" || archivepath.Clean(name) != name || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") ||
 			strings.IndexFunc(name, func(character rune) bool {
-				return !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') &&
-					!(character >= '0' && character <= '9') && !strings.ContainsRune("._-/", character)
+				return (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+					(character < '0' || character > '9') && !strings.ContainsRune("._-/", character)
 			}) >= 0 {
-			return fmt.Errorf("saved plan archive contains an unsafe entry name")
+			return errors.New("saved plan archive contains an unsafe entry name")
 		}
 		if _, duplicate := entries[name]; duplicate {
 			return fmt.Errorf("saved plan archive contains duplicate entry %s", name)
@@ -176,9 +179,9 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 		if !present {
 			return fmt.Errorf("saved plan archive is missing reviewed configuration entry %s", name)
 		}
-		actual, err := readArchivedFile(entry, maxArchivedConfigurationBytes)
-		if err != nil {
-			return err
+		actual, readErr := readArchivedFile(entry, maxArchivedConfigurationBytes)
+		if readErr != nil {
+			return readErr
 		}
 		if !bytes.Equal(actual, expected) {
 			return fmt.Errorf("saved plan configuration entry %s does not match the reviewed source bytes", name)
@@ -194,7 +197,7 @@ func VerifyPlanConfiguration(savedPlanPath, opentofuRoot, providerLockPath, root
 		return err
 	}
 	if !bytes.Equal(actualLock, expectedLock) {
-		return fmt.Errorf("saved plan provider lock does not match the initialized reviewed root")
+		return errors.New("saved plan provider lock does not match the initialized reviewed root")
 	}
 	modulesJSON, err := readArchivedFile(entries["tfconfig/modules.json"], maxArchivedConfigurationBytes)
 	if err != nil {
@@ -263,14 +266,18 @@ func readRegularFile(path string, maximum int64) ([]byte, error) {
 
 func readArchivedFile(file *zip.File, maximum uint64) ([]byte, error) {
 	if file == nil || file.UncompressedSize64 > maximum {
-		return nil, fmt.Errorf("saved plan archive contains an oversized required entry")
+		return nil, errors.New("saved plan archive contains an oversized required entry")
 	}
 	reader, err := file.Open()
 	if err != nil {
 		return nil, fmt.Errorf("open saved plan archive entry %s: %w", file.Name, err)
 	}
-	defer reader.Close()
-	content, err := io.ReadAll(io.LimitReader(reader, int64(maximum)+1))
+	defer func() { _ = reader.Close() }()
+	limit, err := boundedArchiveReadLimit(maximum)
+	if err != nil {
+		return nil, err
+	}
+	content, err := io.ReadAll(io.LimitReader(reader, limit))
 	if err != nil {
 		return nil, fmt.Errorf("read saved plan archive entry %s: %w", file.Name, err)
 	}
@@ -282,21 +289,33 @@ func readArchivedFile(file *zip.File, maximum uint64) ([]byte, error) {
 
 func verifyArchivedPayload(file *zip.File, maximum uint64) error {
 	if file == nil || file.UncompressedSize64 == 0 || file.UncompressedSize64 > maximum {
-		return fmt.Errorf("saved plan archive payload is missing, empty, or oversized")
+		return errors.New("saved plan archive payload is missing, empty, or oversized")
 	}
 	reader, err := file.Open()
 	if err != nil {
 		return fmt.Errorf("open saved plan archive payload: %w", err)
 	}
-	defer reader.Close()
-	written, err := io.Copy(io.Discard, io.LimitReader(reader, int64(maximum)+1))
+	defer func() { _ = reader.Close() }()
+	limit, err := boundedArchiveReadLimit(maximum)
+	if err != nil {
+		return err
+	}
+	written, err := io.Copy(io.Discard, io.LimitReader(reader, limit))
 	if err != nil {
 		return fmt.Errorf("verify saved plan archive payload: %w", err)
 	}
-	if written > int64(maximum) {
-		return fmt.Errorf("saved plan archive payload exceeds the size limit")
+	if written == limit {
+		return errors.New("saved plan archive payload exceeds the size limit")
 	}
 	return nil
+}
+
+func boundedArchiveReadLimit(maximum uint64) (int64, error) {
+	if maximum >= uint64(math.MaxInt64) {
+		return 0, errors.New("saved plan archive size limit exceeds the supported range")
+	}
+	// #nosec G115 -- the preceding bound proves the conversion and increment fit in int64.
+	return int64(maximum) + 1, nil
 }
 
 func verifyArchivedModules(content []byte, contracts map[string]planModuleContract) error {
@@ -316,7 +335,7 @@ func verifyArchivedModules(content []byte, contracts map[string]planModuleContra
 	for _, module := range modules {
 		contract, expected := contracts[module.Key]
 		if !expected || seen[module.Key] {
-			return fmt.Errorf("saved plan module inventory contains an unexpected or duplicate key")
+			return errors.New("saved plan module inventory contains an unexpected or duplicate key")
 		}
 		seen[module.Key] = true
 		if module.Dir != contract.directory {
@@ -324,7 +343,7 @@ func verifyArchivedModules(content []byte, contracts map[string]planModuleContra
 		}
 		if module.Key == "" {
 			if module.Source != nil {
-				return fmt.Errorf("saved plan root module must not declare a source")
+				return errors.New("saved plan root module must not declare a source")
 			}
 		} else if module.Source == nil || *module.Source != contract.source {
 			return fmt.Errorf("saved plan module %q source does not match the reviewed local module", module.Key)
@@ -380,18 +399,18 @@ func VerifyApprovalReceipt(receiptPath string, publicKeyPaths, signaturePaths []
 	var receipt ApprovalReceipt
 	decoder := json.NewDecoder(bytes.NewReader(receiptBytes))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&receipt); err != nil {
-		return receipt, fmt.Errorf("parse approval receipt: %w", err)
+	if decodeErr := decoder.Decode(&receipt); decodeErr != nil {
+		return receipt, fmt.Errorf("parse approval receipt: %w", decodeErr)
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return receipt, err
+	if eofErr := ensureJSONEOF(decoder); eofErr != nil {
+		return receipt, eofErr
 	}
 	canonical, err := json.Marshal(receipt)
 	if err != nil {
 		return receipt, fmt.Errorf("canonicalize approval receipt: %w", err)
 	}
 	if !bytes.Equal(receiptBytes, canonical) {
-		return receipt, fmt.Errorf("approval receipt must be exact canonical compact JSON")
+		return receipt, errors.New("approval receipt must be exact canonical compact JSON")
 	}
 	if receipt.SchemaVersion != ApprovalReceiptSchemaVersion {
 		return receipt, fmt.Errorf("unsupported approval receipt schema %q", receipt.SchemaVersion)
@@ -399,41 +418,41 @@ func VerifyApprovalReceipt(receiptPath string, publicKeyPaths, signaturePaths []
 	if receipt.Operation != expected.Operation || receipt.SourceSHA != expected.SourceSHA ||
 		receipt.Root != expected.Root || receipt.SubjectKind != expected.SubjectKind ||
 		receipt.SubjectSHA256 != expected.SubjectSHA256 || receipt.PlanRunID != expected.PlanRunID {
-		return receipt, fmt.Errorf("approval receipt does not match the exact requested operation, source, root, subject digest, and plan run")
+		return receipt, errors.New("approval receipt does not match the exact requested operation, source, root, subject digest, and plan run")
 	}
 	if receipt.Operation != "apply" && receipt.Operation != "recovery-observation" {
 		return receipt, fmt.Errorf("unsupported approval operation %q", receipt.Operation)
 	}
 	if !fullSourceSHAPattern.MatchString(receipt.SourceSHA) || !hexSHA256Pattern.MatchString(receipt.SubjectSHA256) {
-		return receipt, fmt.Errorf("approval receipt source and subject digests must be complete lowercase hashes")
+		return receipt, errors.New("approval receipt source and subject digests must be complete lowercase hashes")
 	}
 	if receipt.Operation == "apply" {
 		if receipt.SubjectKind != "opentofu-saved-plan" || (receipt.Root != "root-trust" && receipt.Root != "recovery-plane") || !numericRunIDPattern.MatchString(receipt.PlanRunID) {
-			return receipt, fmt.Errorf("apply approval must bind an OpenTofu saved plan, supported root, and numeric plan run")
+			return receipt, errors.New("apply approval must bind an OpenTofu saved plan, supported root, and numeric plan run")
 		}
 	} else if receipt.SubjectKind != "recovery-restore-manifest" || receipt.Root != "recovery-verification" || receipt.PlanRunID != "none" {
-		return receipt, fmt.Errorf("recovery observation approval must bind the recovery restore manifest without pretending to authorize a plan")
+		return receipt, errors.New("recovery observation approval must bind the recovery restore manifest without pretending to authorize a plan")
 	}
 	issued := receipt.IssuedAt.UTC()
 	expires := receipt.ExpiresAt.UTC()
 	current := now.UTC()
 	if !receipt.IssuedAt.Equal(issued.Truncate(time.Second)) || !receipt.ExpiresAt.Equal(expires.Truncate(time.Second)) {
-		return receipt, fmt.Errorf("approval receipt timestamps must be whole UTC seconds")
+		return receipt, errors.New("approval receipt timestamps must be whole UTC seconds")
 	}
 	if !expires.After(issued) || expires.Sub(issued) > 2*time.Hour {
-		return receipt, fmt.Errorf("approval receipt validity must be positive and no longer than two hours")
+		return receipt, errors.New("approval receipt validity must be positive and no longer than two hours")
 	}
 	if issued.After(current.Add(5 * time.Minute)) {
-		return receipt, fmt.Errorf("approval receipt issue time is in the future")
+		return receipt, errors.New("approval receipt issue time is in the future")
 	}
 	if current.Before(issued) || !current.Before(expires) {
-		return receipt, fmt.Errorf("approval receipt is not currently valid")
+		return receipt, errors.New("approval receipt is not currently valid")
 	}
 	if len(receipt.Approvers) != 2 || len(publicKeyPaths) != 2 || len(signaturePaths) != 2 {
-		return receipt, fmt.Errorf("approval receipt requires exactly two approvers, public keys, and signatures")
+		return receipt, errors.New("approval receipt requires exactly two approvers, public keys, and signatures")
 	}
 	if receipt.Approvers[0].Principal >= receipt.Approvers[1].Principal {
-		return receipt, fmt.Errorf("approval identities must be distinct and sorted by principal")
+		return receipt, errors.New("approval identities must be distinct and sorted by principal")
 	}
 	for index, approver := range receipt.Approvers {
 		if !approvalPrincipalPattern.MatchString(approver.Principal) || !hexSHA256Pattern.MatchString(approver.PublicKeySHA256) {
@@ -468,7 +487,7 @@ func VerifyApprovalReceipt(receiptPath string, publicKeyPaths, signaturePaths []
 		}
 	}
 	if receipt.Approvers[0].PublicKeySHA256 == receipt.Approvers[1].PublicKeySHA256 {
-		return receipt, fmt.Errorf("approval public keys must be distinct")
+		return receipt, errors.New("approval public keys must be distinct")
 	}
 	return receipt, nil
 }
@@ -532,43 +551,43 @@ func Verify(repositoryRoot, planPath, evidencePath string, now time.Time) (Docum
 	var document Document
 	decoder := json.NewDecoder(bytes.NewReader(evidenceBytes))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return Document{}, fmt.Errorf("parse evidence: %w", err)
+	if decodeErr := decoder.Decode(&document); decodeErr != nil {
+		return Document{}, fmt.Errorf("parse evidence: %w", decodeErr)
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return Document{}, err
+	if eofErr := ensureJSONEOF(decoder); eofErr != nil {
+		return Document{}, eofErr
 	}
 	if document.SchemaVersion != SchemaVersion {
 		return document, fmt.Errorf("unsupported evidence schema %q", document.SchemaVersion)
 	}
 	if document.Repository != getenvDefault("GITHUB_REPOSITORY", "mindclade/bootstrap") {
-		return document, fmt.Errorf("evidence repository mismatch")
+		return document, errors.New("evidence repository mismatch")
 	}
 	if document.SourceSHA != sourceSHA(repositoryRoot) {
-		return document, fmt.Errorf("evidence source SHA mismatch")
+		return document, errors.New("evidence source SHA mismatch")
 	}
 	sourceDigest, err := manifest.SourceDigest(repositoryRoot)
 	if err != nil {
 		return document, err
 	}
 	if document.SourceTreeSHA256 != sourceDigest {
-		return document, fmt.Errorf("evidence source tree digest mismatch")
+		return document, errors.New("evidence source tree digest mismatch")
 	}
 	if document.Root != "root-trust" && document.Root != "recovery-plane" {
 		return document, fmt.Errorf("unsupported evidence root %q", document.Root)
 	}
 	if !document.ExpiresAt.Equal(document.CreatedAt.Add(6 * time.Hour)) {
-		return document, fmt.Errorf("evidence validity window must be exactly six hours")
+		return document, errors.New("evidence validity window must be exactly six hours")
 	}
 	if document.CreatedAt.After(now.UTC().Add(5 * time.Minute)) {
-		return document, fmt.Errorf("evidence creation time is in the future")
+		return document, errors.New("evidence creation time is in the future")
 	}
 	planBytes, err := os.ReadFile(planPath)
 	if err != nil {
 		return document, err
 	}
 	if document.PlanSHA256 != digest(planBytes) {
-		return document, fmt.Errorf("plan digest mismatch")
+		return document, errors.New("plan digest mismatch")
 	}
 	if !now.UTC().Before(document.ExpiresAt) {
 		return document, fmt.Errorf("plan evidence expired at %s", document.ExpiresAt.Format(time.RFC3339))
@@ -578,7 +597,7 @@ func Verify(repositoryRoot, planPath, evidencePath string, now time.Time) (Docum
 		return document, err
 	}
 	if !mapsEqual(document.ManifestSHA256, currentDigests) {
-		return document, fmt.Errorf("manifest digest mismatch")
+		return document, errors.New("manifest digest mismatch")
 	}
 	summary, err := plancheck.Analyze(planBytes)
 	if err != nil {
@@ -587,7 +606,7 @@ func Verify(repositoryRoot, planPath, evidencePath string, now time.Time) (Docum
 	if summary.Creates != document.Summary.Creates || summary.Updates != document.Summary.Updates ||
 		summary.Deletes != document.Summary.Deletes || summary.Replaces != document.Summary.Replaces ||
 		summary.Reads != document.Summary.Reads || len(document.Summary.Violations) != 0 {
-		return document, fmt.Errorf("plan summary mismatch")
+		return document, errors.New("plan summary mismatch")
 	}
 	return document, nil
 }
@@ -596,7 +615,7 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("parse evidence: trailing JSON value")
+			return errors.New("parse evidence: trailing JSON value")
 		}
 		return fmt.Errorf("parse evidence: %w", err)
 	}
@@ -629,12 +648,14 @@ func digest(data []byte) string {
 }
 
 func sourceSHA(root string) string {
-	status := exec.Command("git", "-C", root, "status", "--porcelain=v1", "--untracked-files=all")
+	// #nosec G204 -- git and every option are fixed; root is only a repository path argument.
+	status := exec.CommandContext(context.Background(), "git", "-C", root, "status", "--porcelain=v1", "--untracked-files=all")
 	statusOutput, err := status.Output()
 	if err != nil || len(stringTrimSpace(statusOutput)) != 0 {
 		return "uncommitted-source"
 	}
-	command := exec.Command("git", "-C", root, "rev-parse", "HEAD")
+	// #nosec G204 -- git and every option are fixed; root is only a repository path argument.
+	command := exec.CommandContext(context.Background(), "git", "-C", root, "rev-parse", "HEAD")
 	output, err := command.Output()
 	if err != nil {
 		return "uncommitted-source"
@@ -653,7 +674,7 @@ func writePrivateFile(path string, data []byte) error {
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o600); err != nil {
 		_ = temporary.Close()
 		return err

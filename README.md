@@ -46,7 +46,12 @@ nix flake check --no-update-lock-file
 nix develop --no-update-lock-file .#ci --command just ci
 ```
 
-The canonical Nix shell supplies the pinned Go, Python, Bazelisk, OpenTofu,
+The root developer-quality interface is `just format`, `just format-check`,
+`just lint`, and `just check`. Formatting is limited to handwritten source and
+configuration; generated plans, state, provider locks, backend files,
+credentials, and evidence remain outside the tracked source tree.
+
+The canonical Nix shell supplies the pinned Go, Python, Bazel, OpenTofu,
 Google Cloud, OPA, and Conftest tools encoded by the repository and CI:
 
 ```bash

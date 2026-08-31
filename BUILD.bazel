@@ -7,6 +7,7 @@ filegroup(
     srcs = glob(
         [
             ".github/**",
+            ".vscode/**",
             "manifests/**",
             "opentofu/**",
             "policy/**",
@@ -19,12 +20,23 @@ filegroup(
             "*.bazel",
         ],
     ) + [
+        ".bazelignore",
+        ".bazelrc",
+        ".bazelversion",
         ".editorconfig",
         ".gitignore",
+        ".golangci.yml",
+        ".markdownlint-cli2.yaml",
+        ".pre-commit-config.yaml",
+        ".yamllint.yaml",
+        "CONTRIBUTING.md",
         "LICENSE",
+        "MODULE.bazel.lock",
+        "biome.json",
         "flake.lock",
         "flake.nix",
         "justfile",
+        "pyproject.toml",
     ],
 )
 

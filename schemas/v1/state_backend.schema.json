@@ -6,9 +6,9 @@
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {"const": "bootstrap.mindclade.dev/v1"},
-    "kind": {"const": "StateBackendSet"},
-    "metadata": {"$ref": "#/$defs/metadata"},
+    "apiVersion": { "const": "bootstrap.mindclade.dev/v1" },
+    "kind": { "const": "StateBackendSet" },
+    "metadata": { "$ref": "#/$defs/metadata" },
     "spec": {
       "type": "object",
       "additionalProperties": false,
@@ -19,8 +19,8 @@
           "additionalProperties": false,
           "required": ["root-trust", "recovery-plane"],
           "properties": {
-            "root-trust": {"$ref": "#/$defs/backend"},
-            "recovery-plane": {"$ref": "#/$defs/backend"}
+            "root-trust": { "$ref": "#/$defs/backend" },
+            "recovery-plane": { "$ref": "#/$defs/backend" }
           }
         }
       }
@@ -31,7 +31,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
-      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"}}
+      "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" } }
     },
     "envRef": {
       "type": "object",
@@ -42,7 +42,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["env"],
-          "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"}}
+          "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
     },
@@ -51,8 +51,8 @@
       "additionalProperties": false,
       "required": ["keyName", "protectionLevel"],
       "properties": {
-        "keyName": {"$ref": "#/$defs/envRef"},
-        "protectionLevel": {"const": "HSM"}
+        "keyName": { "$ref": "#/$defs/envRef" },
+        "protectionLevel": { "const": "HSM" }
       }
     },
     "replica": {
@@ -60,37 +60,52 @@
       "additionalProperties": false,
       "required": ["projectRef", "bucketName", "location", "encryption"],
       "properties": {
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "bucketName": {"$ref": "#/$defs/envRef"},
-        "location": {"enum": ["us-central1", "us-east4"]},
-        "encryption": {"$ref": "#/$defs/encryption"}
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "bucketName": { "$ref": "#/$defs/envRef" },
+        "location": { "enum": ["us-central1", "us-east4"] },
+        "encryption": { "$ref": "#/$defs/encryption" }
       }
     },
     "controls": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["uniformBucketLevelAccess", "publicAccessPrevention", "versioning", "softDeleteRetentionDays", "deletionProtection", "nativeLocking"],
+      "required": [
+        "uniformBucketLevelAccess",
+        "publicAccessPrevention",
+        "versioning",
+        "softDeleteRetentionDays",
+        "deletionProtection",
+        "nativeLocking"
+      ],
       "properties": {
-        "uniformBucketLevelAccess": {"const": true},
-        "publicAccessPrevention": {"const": "enforced"},
-        "versioning": {"const": true},
-        "softDeleteRetentionDays": {"type": "integer", "minimum": 30},
-        "deletionProtection": {"const": true},
-        "nativeLocking": {"const": true}
+        "uniformBucketLevelAccess": { "const": true },
+        "publicAccessPrevention": { "const": "enforced" },
+        "versioning": { "const": true },
+        "softDeleteRetentionDays": { "type": "integer", "minimum": 30 },
+        "deletionProtection": { "const": true },
+        "nativeLocking": { "const": true }
       }
     },
     "backend": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["projectRef", "bucketName", "prefix", "location", "encryption", "replica", "controls"],
+      "required": [
+        "projectRef",
+        "bucketName",
+        "prefix",
+        "location",
+        "encryption",
+        "replica",
+        "controls"
+      ],
       "properties": {
-        "projectRef": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "bucketName": {"$ref": "#/$defs/envRef"},
-        "prefix": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$"},
-        "location": {"enum": ["us-central1", "us-east4"]},
-        "encryption": {"$ref": "#/$defs/encryption"},
-        "replica": {"$ref": "#/$defs/replica"},
-        "controls": {"$ref": "#/$defs/controls"}
+        "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "bucketName": { "$ref": "#/$defs/envRef" },
+        "prefix": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "location": { "enum": ["us-central1", "us-east4"] },
+        "encryption": { "$ref": "#/$defs/encryption" },
+        "replica": { "$ref": "#/$defs/replica" },
+        "controls": { "$ref": "#/$defs/controls" }
       }
     }
   }

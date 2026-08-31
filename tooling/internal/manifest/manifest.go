@@ -3,7 +3,9 @@ package manifest
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,9 +37,10 @@ var manifestSchemas = map[string]string{
 }
 
 var expectedFiles = []string{
-	".editorconfig", ".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
+	".editorconfig", ".golangci.yml", ".markdownlint-cli2.yaml", ".pre-commit-config.yaml", ".vscode/extensions.json", ".vscode/settings.json", ".yamllint.yaml",
+	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
-	".gitignore", "BUILD.bazel", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "component.yaml", "flake.lock", "flake.nix", "justfile",
+	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",
 	"manifests/recovery-policy.yaml", "manifests/signing-roots.yaml", "manifests/state-backends.yaml", "manifests/trust-anchors.yaml",
 	"opentofu/live/recovery-plane/backend.tf", "opentofu/live/recovery-plane/main.tf", "opentofu/live/recovery-plane/outputs.tf",
@@ -87,6 +90,7 @@ var (
 	)
 )
 
+// #nosec G101 -- this is an environment-variable reference name, not a credential value.
 const workforceSecretReference = "WORKFORCE_OIDC_CLIENT_SECRET"
 
 var outOfBandReferences = map[string]bool{
@@ -216,24 +220,24 @@ func ValidateRepository(root string) (Result, error) {
 // Context is forbidden for root-trust and required for recovery-plane.
 func RenderVariables(root, composition, valuesPath, contextPath, outputPath string) (RenderResult, error) {
 	if composition != "root-trust" && composition != "recovery-plane" {
-		return RenderResult{}, fmt.Errorf("composition must be root-trust or recovery-plane")
+		return RenderResult{}, errors.New("composition must be root-trust or recovery-plane")
 	}
 	if valuesPath == "" || outputPath == "" {
-		return RenderResult{}, fmt.Errorf("values and output paths are required")
+		return RenderResult{}, errors.New("values and output paths are required")
 	}
 	if composition == "root-trust" && contextPath != "" {
-		return RenderResult{}, fmt.Errorf("context is forbidden for root-trust")
+		return RenderResult{}, errors.New("context is forbidden for root-trust")
 	}
 	if composition == "recovery-plane" && contextPath == "" {
-		return RenderResult{}, fmt.Errorf("context is required for recovery-plane")
+		return RenderResult{}, errors.New("context is required for recovery-plane")
 	}
 
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
 		return RenderResult{}, err
 	}
-	if _, err := ValidateRepository(absoluteRoot); err != nil {
-		return RenderResult{}, fmt.Errorf("repository is not valid: %w", err)
+	if _, validationErr := ValidateRepository(absoluteRoot); validationErr != nil {
+		return RenderResult{}, fmt.Errorf("repository is not valid: %w", validationErr)
 	}
 	documents, err := loadCompilerDocuments(absoluteRoot)
 	if err != nil {
@@ -296,8 +300,8 @@ func RenderVariables(root, composition, valuesPath, contextPath, outputPath stri
 		}
 		output = map[string]any{"recovery": compiled.recoveryVariables(context)}
 	}
-	if err := compiled.err(); err != nil {
-		return RenderResult{}, err
+	if compilationErr := compiled.err(); compilationErr != nil {
+		return RenderResult{}, compilationErr
 	}
 
 	encoded, err := json.MarshalIndent(output, "", "  ")
@@ -368,29 +372,29 @@ func validateComponent(root string) error {
 		return fmt.Errorf("validate component.yaml: %w", err)
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("validate component.yaml: multiple YAML documents are not allowed")
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("validate component.yaml: multiple YAML documents are not allowed")
 	}
 	if component.APIVersion != "mindclade.io/v1alpha1" || component.Kind != "Component" || component.Metadata.Name != "bootstrap" {
-		return fmt.Errorf("validate component.yaml: invalid component identity")
+		return errors.New("validate component.yaml: invalid component identity")
 	}
 	if component.Metadata.Description == "" || component.Metadata.Annotations["github.com/project-slug"] != "mindclade/bootstrap" ||
 		component.Metadata.Annotations["mindclade.dev/authority-boundary"] != "ring-0-only" ||
 		component.Metadata.Annotations["mindclade.dev/trust-tier"] != "ring-0" ||
 		component.Metadata.Annotations["mindclade.dev/recovery-tier"] != "isolated-ring-0" {
-		return fmt.Errorf("validate component.yaml: metadata contract is incomplete")
+		return errors.New("validate component.yaml: metadata contract is incomplete")
 	}
 	if component.Spec.Type != "bootstrap-control-plane" || component.Spec.Lifecycle != "pre-production" || component.Spec.Maturity != "pre-production" ||
 		component.Spec.Owner != "security" || component.Spec.RepositoryClass != "infrastructure-source" ||
 		component.Spec.DataClassification != "public" || component.Spec.TrustTier != "ring-0" ||
 		component.Spec.RecoveryTier != "isolated-ring-0" || component.Spec.ProductionAuthority {
-		return fmt.Errorf("validate component.yaml: owner/readiness/authority contract is invalid")
+		return errors.New("validate component.yaml: owner/readiness/authority contract is invalid")
 	}
 	if component.Spec.Dependencies == nil || len(component.Spec.Provides) < 3 ||
 		len(component.Spec.SecurityReviewers) < 1 || component.Spec.SecurityReviewers[0] != "security" ||
 		len(component.Spec.OperationalReviewers) < 1 || component.Spec.OperationalReviewers[0] != "platform-operations" ||
 		component.Spec.OperationalReviewers[0] == component.Spec.Owner {
-		return fmt.Errorf("validate component.yaml: dependency/ownership contract is invalid")
+		return errors.New("validate component.yaml: dependency/ownership contract is invalid")
 	}
 	for _, dependency := range component.Spec.Dependencies {
 		if !strings.HasPrefix(dependency, "component:") || strings.TrimPrefix(dependency, "component:") == "" {
@@ -400,7 +404,7 @@ func validateComponent(root string) error {
 	if component.Spec.Release.Strategy == "" || component.Spec.Release.Artifact != "source-commit" || !component.Spec.Release.Immutable ||
 		len(component.Spec.Release.Evidence) < 3 || component.Spec.Activation.SourceReady.Description == "" ||
 		component.Spec.Activation.Connected.Description == "" || component.Spec.License == "" {
-		return fmt.Errorf("validate component.yaml: release/activation metadata is incomplete")
+		return errors.New("validate component.yaml: release/activation metadata is incomplete")
 	}
 	return nil
 }
@@ -419,7 +423,7 @@ func SourceDigest(root string) (string, error) {
 		_, _ = digest.Write(data)
 		_, _ = digest.Write([]byte{0})
 	}
-	return fmt.Sprintf("%x", digest.Sum(nil)), nil
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func validateReferences(root string) error {
@@ -589,7 +593,7 @@ func validateWorkflowSecurity(root string) error {
 
 		jobs, ok := workflow["jobs"].(map[string]any)
 		if !ok || !reflect.DeepEqual(sortedKeys(jobs), sortedKeys(contract.jobs)) {
-			problems = append(problems, fmt.Sprintf("%s must contain exactly the approved jobs", relative))
+			problems = append(problems, relative+" must contain exactly the approved jobs")
 			continue
 		}
 		actions := make([]string, 0)
@@ -665,7 +669,7 @@ func validateWorkflowSecurity(root string) error {
 		expectedActions := append([]string{}, contract.actions...)
 		sort.Strings(expectedActions)
 		if !reflect.DeepEqual(actions, expectedActions) {
-			problems = append(problems, fmt.Sprintf("%s actions must equal the exact immutable allowlist", relative))
+			problems = append(problems, relative+" actions must equal the exact immutable allowlist")
 		}
 	}
 
@@ -947,6 +951,7 @@ func validateProtectedApplyContract(root string) error {
 		return err
 	}
 	content := string(raw)
+	// #nosec G101 -- these are workflow source snippets, not credential values.
 	required := map[string]string{
 		"source-bound run name":                   `run-name: protected-${{ inputs.operation }} / ${{ inputs.root }} / ${{ inputs.source_sha }}`,
 		"private artifact transport gate":         `test "${REPOSITORY_VISIBILITY}" = "private"`,
@@ -1059,17 +1064,17 @@ func validateDependabot(root string) error {
 	}
 	document, _ := value.(map[string]any)
 	if document["version"] != float64(2) && document["version"] != 2 {
-		return fmt.Errorf(".github/dependabot.yml must use version 2")
+		return errors.New(".github/dependabot.yml must use version 2")
 	}
 	updates, ok := document["updates"].([]any)
 	if !ok {
-		return fmt.Errorf(".github/dependabot.yml updates must be a list")
+		return errors.New(".github/dependabot.yml updates must be a list")
 	}
 	var actual []string
 	for _, raw := range updates {
 		update, ok := raw.(map[string]any)
 		if !ok {
-			return fmt.Errorf(".github/dependabot.yml contains a non-object update")
+			return errors.New(".github/dependabot.yml contains a non-object update")
 		}
 		ecosystem, _ := update["package-ecosystem"].(string)
 		directory, _ := update["directory"].(string)
@@ -1084,7 +1089,7 @@ func validateDependabot(root string) error {
 		"opentofu|/opentofu/live/root-trust",
 	}
 	if !reflect.DeepEqual(actual, expected) {
-		return fmt.Errorf(".github/dependabot.yml ecosystems and roots must equal the exact approved set")
+		return errors.New(".github/dependabot.yml ecosystems and roots must equal the exact approved set")
 	}
 	return nil
 }
@@ -1165,7 +1170,7 @@ func LoadYAML(path string) (any, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return nil, fmt.Errorf("parse %s: multiple YAML documents are not allowed", path)
 		}
@@ -1184,8 +1189,8 @@ func validateDocument(root, manifestPath, schemaPath string) error {
 		return fmt.Errorf("normalize %s: %w", manifestPath, err)
 	}
 	var jsonDocument any
-	if err := json.Unmarshal(data, &jsonDocument); err != nil {
-		return fmt.Errorf("normalize %s: %w", manifestPath, err)
+	if decodeErr := json.Unmarshal(data, &jsonDocument); decodeErr != nil {
+		return fmt.Errorf("normalize %s: %w", manifestPath, decodeErr)
 	}
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile("file://" + filepath.ToSlash(filepath.Join(root, schemaPath)))
@@ -1298,7 +1303,7 @@ func checkValue(value any, path string, problems *[]string) {
 		if valueFrom, ok := typed["valueFrom"].(map[string]any); ok {
 			env, _ := valueFrom["env"].(string)
 			if !envNamePattern.MatchString(env) {
-				*problems = append(*problems, fmt.Sprintf("%s has invalid valueFrom.env", path))
+				*problems = append(*problems, path+" has invalid valueFrom.env")
 			}
 		}
 		for key, child := range typed {
@@ -1346,7 +1351,7 @@ func validateTree(root string) error {
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
 			base := entry.Name()
-			if rel == ".git" || strings.HasPrefix(rel, ".git/") || base == ".terraform" || strings.HasPrefix(base, "bazel-") {
+			if rel == ".git" || strings.HasPrefix(rel, ".git/") || base == ".ruff_cache" || base == ".terraform" || strings.HasPrefix(base, "bazel-") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1384,10 +1389,13 @@ func validateTree(root string) error {
 }
 
 func validateTrackedPaths(root string) error {
-	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".git")); errors.Is(err, os.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect repository metadata: %w", err)
 	}
-	command := exec.Command("git", "-C", root, "ls-files", "-z")
+	// #nosec G204 -- git and every option are fixed; root is only a validated repository path argument.
+	command := exec.CommandContext(context.Background(), "git", "-C", root, "ls-files", "-z")
 	output, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("enumerate tracked source: %w", err)
@@ -1479,7 +1487,7 @@ func loadExactStringMap(path string) (map[string]string, error) {
 		return nil, err
 	}
 	if values == nil {
-		return nil, fmt.Errorf("JSON document must be an object")
+		return nil, errors.New("JSON document must be an object")
 	}
 	return values, nil
 }
@@ -1529,7 +1537,7 @@ func decodeExactJSON(data []byte, destination any) error {
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("decode exact JSON: trailing data is not allowed")
+		return errors.New("decode exact JSON: trailing data is not allowed")
 	}
 	return nil
 }
@@ -1542,7 +1550,7 @@ func rejectDuplicateJSONKeys(data []byte) error {
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("decode exact JSON: trailing data is not allowed")
+			return errors.New("decode exact JSON: trailing data is not allowed")
 		}
 		return fmt.Errorf("decode exact JSON: %w", err)
 	}
@@ -1568,7 +1576,7 @@ func consumeJSONValue(decoder *json.Decoder) error {
 			}
 			key, ok := keyToken.(string)
 			if !ok {
-				return fmt.Errorf("object key must be a string")
+				return errors.New("object key must be a string")
 			}
 			if seen[key] {
 				return fmt.Errorf("duplicate object key %q", key)
@@ -1583,7 +1591,7 @@ func consumeJSONValue(decoder *json.Decoder) error {
 			return err
 		}
 		if closing != json.Delim('}') {
-			return fmt.Errorf("object is not closed")
+			return errors.New("object is not closed")
 		}
 	case '[':
 		for decoder.More() {
@@ -1596,7 +1604,7 @@ func consumeJSONValue(decoder *json.Decoder) error {
 			return err
 		}
 		if closing != json.Delim(']') {
-			return fmt.Errorf("array is not closed")
+			return errors.New("array is not closed")
 		}
 	default:
 		return fmt.Errorf("unexpected delimiter %q", delimiter)
@@ -1613,9 +1621,9 @@ func protectOutputTarget(root, valuesPath, contextPath, outputPath string) error
 		if path == "" {
 			continue
 		}
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return err
+		absolute, pathErr := filepath.Abs(path)
+		if pathErr != nil {
+			return pathErr
 		}
 		if output == absolute {
 			return fmt.Errorf("output must not overwrite %s input", label)
@@ -1623,7 +1631,7 @@ func protectOutputTarget(root, valuesPath, contextPath, outputPath string) error
 	}
 	relative, err := filepath.Rel(root, output)
 	if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("output must be outside the closed blueprint repository")
+		return errors.New("output must be outside the closed blueprint repository")
 	}
 	return nil
 }
@@ -1639,7 +1647,7 @@ func writePrivateAtomic(path string, data []byte) (returnErr error) {
 		return fmt.Errorf("inspect output directory: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("output parent is not a directory")
+		return errors.New("output parent is not a directory")
 	}
 	temporary, err := os.CreateTemp(directory, ".bootstrap-vars-*")
 	if err != nil {
@@ -3090,10 +3098,6 @@ func celString(value string) string {
 	escaped := strings.ReplaceAll(value, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 	return "'" + escaped + "'"
-}
-
-func suffix(base, role string) string {
-	return strings.TrimRight(base, "/") + "/" + role
 }
 
 func serviceAccountMember(accountID, projectID string) string {

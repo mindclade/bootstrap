@@ -1,14 +1,14 @@
+# pyright: basic, reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 """Adversarial tests for Ring-0 OpenTofu plan classification."""
 
 import copy
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ACTIVE_SIGNING_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErp5ckXjgHSqIb2af/45Lat+pw0HK
@@ -97,7 +97,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 check=False,
             )
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
     def resource(self, resource_type, actions, after):
         if isinstance(after, dict) and resource_type in {
@@ -161,9 +161,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "deleted": False,
             },
         )
-        resource["address"] = (
-            f'{module}.google_project_iam_custom_role.replication["{instance}"]'
-        )
+        resource["address"] = f'{module}.google_project_iam_custom_role.replication["{instance}"]'
         return resource
 
     def replication_transfer_job(
@@ -189,12 +187,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "transfer_spec": [],
                 "replication_spec": [
                     {
-                        "gcs_data_source": [
-                            {"bucket_name": source, "path": ""}
-                        ],
-                        "gcs_data_sink": [
-                            {"bucket_name": destination, "path": ""}
-                        ],
+                        "gcs_data_source": [{"bucket_name": source, "path": ""}],
+                        "gcs_data_sink": [{"bucket_name": destination, "path": ""}],
                         "object_conditions": [
                             {
                                 "include_prefixes": [prefix],
@@ -249,8 +243,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         )
         resource["address"] = (
-            "module.recovery_exports.google_project_iam_custom_role."
-            f"state_export_{name}"
+            f"module.recovery_exports.google_project_iam_custom_role.state_export_{name}"
         )
         if key is not None:
             resource["address"] += f'["{key}"]'
@@ -271,15 +264,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             destination="bootstrap-recovery-recovery-exports",
         )
         resource["address"] = (
-            "module.recovery_exports.google_storage_transfer_job."
-            f'state_export["{key}"]'
+            f'module.recovery_exports.google_storage_transfer_job.state_export["{key}"]'
         )
         resource["change"]["after"].update(
             {
                 "project": project,
-                "service_account": (
-                    f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"
-                ),
+                "service_account": (f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"),
             }
         )
         return resource
@@ -314,9 +304,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         }
         return {
             "schema_version": 2,
-            "manifest_digests": {
-                path: "sha256:" + "a" * 64
-                for path in (
+            "manifest_digests": dict.fromkeys(
+                (
                     "manifests/audit-roots.yaml",
                     "manifests/break-glass-roles.yaml",
                     "manifests/identity-federation.yaml",
@@ -324,13 +313,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "manifests/signing-roots.yaml",
                     "manifests/state-backends.yaml",
                     "manifests/trust-anchors.yaml",
-                )
-            },
+                ),
+                "sha256:" + "a" * 64,
+            ),
             "signing_key_versions": signing_versions,
             "signing_public_key_pem_sha256": {
-                key: hashlib.sha256(
-                    ACTIVE_SIGNING_PUBLIC_KEY_PEM.encode("utf-8")
-                ).hexdigest()
+                key: hashlib.sha256(ACTIVE_SIGNING_PUBLIC_KEY_PEM.encode("utf-8")).hexdigest()
                 for key in signing_versions
             },
             "signing_windows": signing_windows,
@@ -421,12 +409,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         recovery_project = "bootstrap-recovery"
         export_bucket = "bootstrap-recovery-recovery-exports"
         evidence_bucket = "bootstrap-recovery-recovery-evidence"
-        plan_member = (
-            "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com"
-        )
-        apply_member = (
-            "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com"
-        )
+        plan_member = "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com"
+        apply_member = "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com"
         recovery_member = (
             "serviceAccount:bootstrap-recovery@bootstrap-recovery.iam.gserviceaccount.com"
         )
@@ -469,9 +453,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "location": "us-east4",
             },
         )
-        key_ring["address"] = (
-            "module.recovery_exports.google_kms_key_ring.recovery"
-        )
+        key_ring["address"] = "module.recovery_exports.google_kms_key_ring.recovery"
         resources.append(key_ring)
 
         storage_agent = self.resource(
@@ -519,8 +501,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             crypto_key["address"] = (
-                "module.recovery_exports.google_kms_crypto_key.recovery"
-                f'[{json.dumps(key)}]'
+                f"module.recovery_exports.google_kms_crypto_key.recovery[{json.dumps(key)}]"
             )
             resources.append(crypto_key)
 
@@ -535,7 +516,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             kms_binding["address"] = (
                 "module.recovery_exports.google_kms_crypto_key_iam_member.storage"
-                f'[{json.dumps(key)}]'
+                f"[{json.dumps(key)}]"
             )
             resources.append(kms_binding)
 
@@ -552,17 +533,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "force_destroy": False,
                     "versioning": [{"enabled": True}],
                     "encryption": [{"default_kms_key_name": crypto_key_name}],
-                    "retention_policy": [
-                        {"retention_period": retention, "is_locked": True}
-                    ],
-                    "soft_delete_policy": [
-                        {"retention_duration_seconds": 2592000}
-                    ],
+                    "retention_policy": [{"retention_period": retention, "is_locked": True}],
+                    "soft_delete_policy": [{"retention_duration_seconds": 2592000}],
                 },
             )
             bucket["address"] = (
-                "module.recovery_exports.google_storage_bucket.recovery"
-                f'[{json.dumps(key)}]'
+                f"module.recovery_exports.google_storage_bucket.recovery[{json.dumps(key)}]"
             )
             resources.append(bucket)
 
@@ -571,17 +547,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ["no-op"],
                 {
                     "bucket": bucket_name,
-                    "role": (
-                        f"projects/{recovery_project}/roles/"
-                        "bootstrapRecoveryPlanRead"
-                    ),
+                    "role": (f"projects/{recovery_project}/roles/bootstrapRecoveryPlanRead"),
                     "member": plan_member,
                     "condition": [],
                 },
             )
             metadata_binding["address"] = (
                 "module.recovery_exports.google_storage_bucket_iam_member.plan_read"
-                f'[{json.dumps(key)}]'
+                f"[{json.dumps(key)}]"
             )
             resources.append(metadata_binding)
 
@@ -594,10 +567,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ["no-op"],
                 {
                     "bucket": bucket_name,
-                    "role": (
-                        f"projects/{recovery_project}/roles/"
-                        "bootstrapRecoveryPlanObjectRead"
-                    ),
+                    "role": (f"projects/{recovery_project}/roles/bootstrapRecoveryPlanObjectRead"),
                     "member": plan_member,
                     "condition": [
                         {
@@ -613,17 +583,25 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             object_binding["address"] = (
                 "module.recovery_exports.google_storage_bucket_iam_member.plan_object_read"
-                f'[{json.dumps(key)}]'
+                f"[{json.dumps(key)}]"
             )
             resources.append(object_binding)
 
         access_contracts = {
             "exports-exporter": (export_bucket, "roles/storage.objectCreator", apply_member),
             "exports-recovery": (export_bucket, "roles/storage.objectViewer", recovery_member),
-            "exports-recovery-metadata": (export_bucket, "roles/storage.legacyBucketReader", recovery_member),
+            "exports-recovery-metadata": (
+                export_bucket,
+                "roles/storage.legacyBucketReader",
+                recovery_member,
+            ),
             "evidence-exporter": (evidence_bucket, "roles/storage.objectCreator", apply_member),
             "evidence-recovery": (evidence_bucket, "roles/storage.objectViewer", recovery_member),
-            "evidence-recovery-metadata": (evidence_bucket, "roles/storage.legacyBucketReader", recovery_member),
+            "evidence-recovery-metadata": (
+                evidence_bucket,
+                "roles/storage.legacyBucketReader",
+                recovery_member,
+            ),
         }
         for instance, (bucket_name, role, member) in access_contracts.items():
             binding = self.resource(
@@ -638,7 +616,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             binding["address"] = (
                 "module.recovery_exports.google_storage_bucket_iam_member.access"
-                f'[{json.dumps(instance)}]'
+                f"[{json.dumps(instance)}]"
             )
             resources.append(binding)
 
@@ -686,14 +664,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             keys = ("root-trust", "recovery-plane") if indexed else (None,)
             for key in keys:
                 address = (
-                    "module.recovery_exports.google_project_iam_custom_role."
-                    f"state_export_{name}"
+                    f"module.recovery_exports.google_project_iam_custom_role.state_export_{name}"
                 )
                 project = recovery_project
                 if key == "root-trust":
                     project = "bootstrap-state-root"
                 if key is not None:
-                    address += f'[{json.dumps(key)}]'
+                    address += f"[{json.dumps(key)}]"
                 custom_role(address, project, role_id, permissions)
 
         export_specs = {
@@ -701,13 +678,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "recovery-plane": (recovery_project, "bootstrap-recovery-primary"),
         }
         for key, (project, source_bucket) in export_specs.items():
-            export_email = (
-                f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"
-            )
+            export_email = f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"
             export_member = f"serviceAccount:{export_email}"
-            service_account_id = (
-                f"projects/{project}/serviceAccounts/{export_email}"
-            )
+            service_account_id = f"projects/{project}/serviceAccounts/{export_email}"
 
             service_account = self.resource(
                 "google_service_account",
@@ -725,8 +698,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             service_account["address"] = (
-                "module.recovery_exports.google_service_account.state_export"
-                f'[{json.dumps(key)}]'
+                f"module.recovery_exports.google_service_account.state_export[{json.dumps(key)}]"
             )
             resources.append(service_account)
 
@@ -749,13 +721,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     },
                 ),
             ):
-                data_resource = self.resource(
-                    data_type, ["read"], {"project": project, **extra}
-                )
+                data_resource = self.resource(data_type, ["read"], {"project": project, **extra})
                 data_resource["mode"] = "data"
                 data_resource["address"] = (
-                    f"module.recovery_exports.data.{data_type}.{name}"
-                    f'[{json.dumps(key)}]'
+                    f"module.recovery_exports.data.{data_type}.{name}[{json.dumps(key)}]"
                 )
                 resources.append(data_resource)
 
@@ -862,8 +831,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             for resource_type, name, after in definitions:
                 binding = self.resource(resource_type, ["no-op"], after)
                 binding["address"] = (
-                    f"module.recovery_exports.{resource_type}.{name}"
-                    f'[{json.dumps(key)}]'
+                    f"module.recovery_exports.{resource_type}.{name}[{json.dumps(key)}]"
                 )
                 resources.append(binding)
 
@@ -922,9 +890,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "source": "",
                 },
             )
-            fixed_object["address"] = (
-                f"module.recovery_exports.google_storage_bucket_object.{name}"
-            )
+            fixed_object["address"] = f"module.recovery_exports.google_storage_bucket_object.{name}"
             resources.append(fixed_object)
 
         return resources
@@ -936,8 +902,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             {
                 "name": key_name,
                 "key_ring": (
-                    "projects/bootstrap-signing/locations/us-central1/"
-                    "keyRings/bootstrap-signing"
+                    "projects/bootstrap-signing/locations/us-central1/keyRings/bootstrap-signing"
                 ),
                 "purpose": "ASYMMETRIC_SIGN",
                 "destroy_scheduled_duration": "2592000s",
@@ -950,10 +915,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ],
             },
         )
-        resource["address"] = (
-            "module.signing_root.google_kms_crypto_key.signing"
-            f'["{key_name}"]'
-        )
+        resource["address"] = f'module.signing_root.google_kms_crypto_key.signing["{key_name}"]'
         return resource
 
     def signing_version(
@@ -981,7 +943,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         )
         resource["address"] = (
             "module.signing_root.google_kms_crypto_key_version.signing"
-            f'[{json.dumps(f"{key_name}:{version_ref}")}]'
+            f"[{json.dumps(f'{key_name}:{version_ref}')}]"
         )
         return resource
 
@@ -1010,8 +972,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
     def active_signing_data(self, key_name="audit-anchor", version_number=1):
         values = self.active_signing_values(key_name, version_number)
         address = (
-            "module.signing_root.data.google_kms_crypto_key_version.active"
-            f'[{json.dumps(key_name)}]'
+            f"module.signing_root.data.google_kms_crypto_key_version.active[{json.dumps(key_name)}]"
         )
         resource = {
             "address": address,
@@ -1104,7 +1065,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         )
         resource["address"] = (
             "module.signing_root.google_kms_crypto_key_iam_member.signer"
-            f'[{json.dumps(f"{key_name}:{principal}")}]'
+            f"[{json.dumps(f'{key_name}:{principal}')}]"
         )
         return resource
 
@@ -1131,11 +1092,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             version["address"] = (
                 "module.signing_root.google_kms_crypto_key_version.signing"
-                f'[{json.dumps(f"{key_name}:v20260829")}]'
+                f"[{json.dumps(f'{key_name}:v20260829')}]"
             )
-            version["change"]["after_unknown"] = {
-                field: True
-                for field in (
+            version["change"]["after_unknown"] = dict.fromkeys(
+                (
                     "algorithm",
                     "attestation",
                     "crypto_key",
@@ -1144,8 +1104,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "name",
                     "protection_level",
                     "state",
-                )
-            }
+                ),
+                True,
+            )
             resources.append(version)
 
             if key_name in {
@@ -1171,7 +1132,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             signer["address"] = (
                 "module.signing_root.google_kms_crypto_key_iam_member.signer"
-                f'[{json.dumps(f"{key_name}:{principal}")}]'
+                f"[{json.dumps(f'{key_name}:{principal}')}]"
             )
             signer["change"]["after_unknown"] = {
                 "condition": [{"expression": True}],
@@ -1231,9 +1192,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                                     "expressions": {
                                         "condition": [
                                             {
-                                                "expression": {
-                                                    "references": signer_references
-                                                },
+                                                "expression": {"references": signer_references},
                                                 "title": {
                                                     "references": [
                                                         "each.value.key_name",
@@ -1354,11 +1313,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         )
         resource["address"] = (
             "module.signing_root.google_kms_crypto_key_version.signing"
-            f'[{json.dumps(f"{key_name}:{version_ref}")}]'
+            f"[{json.dumps(f'{key_name}:{version_ref}')}]"
         )
-        resource["change"]["after_unknown"] = {
-            field: True
-            for field in (
+        resource["change"]["after_unknown"] = dict.fromkeys(
+            (
                 "algorithm",
                 "attestation",
                 "crypto_key",
@@ -1367,8 +1325,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "name",
                 "protection_level",
                 "state",
-            )
-        }
+            ),
+            True,
+        )
         return resource
 
     def github_plan_identity_resources(self):
@@ -1431,8 +1390,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         )
         provider["address"] = (
-            "module.github_federation.google_iam_workload_identity_pool_provider."
-            'github["plan"]'
+            'module.github_federation.google_iam_workload_identity_pool_provider.github["plan"]'
         )
         service_account = self.resource(
             "google_service_account",
@@ -1463,8 +1421,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         )
         binding["address"] = (
-            "module.github_federation.google_service_account_iam_member."
-            'github["plan"]'
+            'module.github_federation.google_service_account_iam_member.github["plan"]'
         )
         return [identity, state, pool, provider, service_account, binding]
 
@@ -1477,19 +1434,16 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "project": "bootstrap-identity",
                 "workload_identity_pool_id": "github-ci-evidence",
                 "name": (
-                    "projects/123456789/locations/global/workloadIdentityPools/"
-                    "github-ci-evidence"
+                    "projects/123456789/locations/global/workloadIdentityPools/github-ci-evidence"
                 ),
                 "disabled": False,
             },
         )
         pool["address"] = (
-            "module.github_federation.google_iam_workload_identity_pool."
-            'ci_evidence["archive"]'
+            'module.github_federation.google_iam_workload_identity_pool.ci_evidence["archive"]'
         )
         repository_ids = (
-            "['1350980188', '1350986053', '1350991612', "
-            "'1350991963', '1350992171', '1351193819']"
+            "['1350980188', '1350986053', '1350991612', '1350991963', '1350992171', '1351193819']"
         )
         workflow_sha = "a" * 40
         recovery_sha = "b" * 40
@@ -1535,9 +1489,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         resources = [identity, pool]
         for role in ("writer", "verifier"):
             mapping = {
-                "google.subject": (
-                    f"'ci-evidence-{role}:' + assertion.repository_id"
-                ),
+                "google.subject": (f"'ci-evidence-{role}:' + assertion.repository_id"),
                 "attribute.evidence_role": f"'{role}'",
                 "attribute.repository_id": "assertion.repository_id",
                 "attribute.repository_owner_id": "assertion.repository_owner_id",
@@ -1594,8 +1546,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             service_account["address"] = (
-                "module.github_federation.google_service_account."
-                f'ci_evidence["{role}"]'
+                f'module.github_federation.google_service_account.ci_evidence["{role}"]'
             )
             binding = self.resource(
                 "google_service_account_iam_member",
@@ -1614,17 +1565,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             binding["address"] = (
-                "module.github_federation.google_service_account_iam_member."
-                f'ci_evidence["{role}"]'
+                f'module.github_federation.google_service_account_iam_member.ci_evidence["{role}"]'
             )
             resources.extend([provider, service_account, binding])
         return resources
 
     def infrastructure_identity_resources(self, identity="production-apply"):
         environment, role = identity.split("-")
-        execution_environment = (
-            "trusted-build" if role == "plan" else "infrastructure-apply"
-        )
+        execution_environment = "trusted-build" if role == "plan" else "infrastructure-apply"
         project = self.project_resource("identity", "bootstrap-identity")
         pool = self.resource(
             "google_iam_workload_identity_pool",
@@ -1633,23 +1581,18 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "project": "bootstrap-identity",
                 "workload_identity_pool_id": "infrastructure-live",
                 "name": (
-                    "projects/123456789/locations/global/workloadIdentityPools/"
-                    "infrastructure-live"
+                    "projects/123456789/locations/global/workloadIdentityPools/infrastructure-live"
                 ),
                 "disabled": False,
             },
         )
         pool["address"] = (
-            "module.github_federation.google_iam_workload_identity_pool."
-            'infrastructure_live["pool"]'
+            'module.github_federation.google_iam_workload_identity_pool.infrastructure_live["pool"]'
         )
         workflow = (
-            "mindclade/infrastructure-live/.github/workflows/"
-            "protected-apply.yml@refs/heads/main"
+            "mindclade/infrastructure-live/.github/workflows/protected-apply.yml@refs/heads/main"
         )
-        immutable_repository = (
-            "mindclade@316676129/infrastructure-live@1350992171"
-        )
+        immutable_repository = "mindclade@316676129/infrastructure-live@1350992171"
         condition = " && ".join(
             [
                 (
@@ -1716,8 +1659,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         )
         service["address"] = (
-            "module.github_federation.google_service_account."
-            f'infrastructure_live["{identity}"]'
+            f'module.github_federation.google_service_account.infrastructure_live["{identity}"]'
         )
         binding = self.resource(
             "google_service_account_iam_member",
@@ -1755,9 +1697,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "force_destroy": False,
                 "versioning": [{"enabled": True}],
                 "encryption": [{"default_kms_key_name": "kms-key"}],
-                "soft_delete_policy": [
-                    {"retention_duration_seconds": 2592000}
-                ],
+                "soft_delete_policy": [{"retention_duration_seconds": 2592000}],
                 "lifecycle_rule": [
                     {
                         "action": [{"type": "Delete"}],
@@ -1772,24 +1712,16 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ],
             },
         )
-        resource["address"] = (
-            'module.root_state.google_storage_bucket.state["primary"]'
-        )
-        result = self.check_plan(
-            [resource]
-        )
+        resource["address"] = 'module.root_state.google_storage_bucket.state["primary"]'
+        result = self.check_plan([resource])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        resource["change"]["after"]["lifecycle_rule"][0]["condition"][0][
-            "num_newer_versions"
-        ] = 2
+        resource["change"]["after"]["lifecycle_rule"][0]["condition"][0]["num_newer_versions"] = 2
         result = self.check_plan([resource])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("preserving the three newest generations", result.stderr)
 
-        resource["change"]["after"]["lifecycle_rule"][0]["condition"][0][
-            "num_newer_versions"
-        ] = 3
+        resource["change"]["after"]["lifecycle_rule"][0]["condition"][0]["num_newer_versions"] = 3
         resource["change"]["after"]["lifecycle_rule"].append(
             json.loads(json.dumps(resource["change"]["after"]["lifecycle_rule"][0]))
         )
@@ -1814,9 +1746,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
     def test_delete_or_replace_is_rejected(self):
         for actions in (["delete"], ["delete", "create"]):
             with self.subTest(actions=actions):
-                result = self.check_plan(
-                    [self.resource("google_storage_bucket", actions, None)]
-                )
+                result = self.check_plan([self.resource("google_storage_bucket", actions, None)])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("must not delete or replace", result.stderr)
 
@@ -1859,9 +1789,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "member": "group:root-trust-administrators@example.com",
             },
         )
-        resource["address"] = (
-            "google_organization_iam_member.apply_logging_config_writer"
-        )
+        resource["address"] = "google_organization_iam_member.apply_logging_config_writer"
 
         result = self.check_root_plan([resource], "root-trust")
         self.assertNotEqual(result.returncode, 0)
@@ -1898,12 +1826,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
     def test_recovery_plane_rejects_resource_values_outside_compiled_inputs(self):
         resources = self.complete_recovery_plane_resources()
         document = self.strict_recovery_document(resources)
-        document["variables"]["recovery"]["value"][
-            "export_key_name"
-        ] = "unreviewed-export-key"
-        result = self.run_plan_document(
-            "plan-check", document, "--root", "recovery-plane"
-        )
+        document["variables"]["recovery"]["value"]["export_key_name"] = "unreviewed-export-key"
+        result = self.run_plan_document("plan-check", document, "--root", "recovery-plane")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("compiled key name and key ring", result.stderr)
 
@@ -1928,12 +1852,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             ),
         )
-        resources[0]["address"] = (
-            "google_organization_iam_member.apply_project_creator"
-        )
-        resources[1]["address"] = (
-            "google_billing_account_iam_member.apply_billing_user"
-        )
+        resources[0]["address"] = "google_organization_iam_member.apply_project_creator"
+        resources[1]["address"] = "google_billing_account_iam_member.apply_billing_user"
         for resource in resources:
             with self.subTest(address=resource["address"]):
                 result = self.check_plan([resource])
@@ -1987,8 +1907,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_only_exact_bucket_addresses_may_defer_computed_cmek(self):
         for address, accepted in (
-            ("module.root_state.google_storage_bucket.state[\"primary\"]", True),
-            ("module.unreviewed.google_storage_bucket.state[\"primary\"]", False),
+            ('module.root_state.google_storage_bucket.state["primary"]', True),
+            ('module.unreviewed.google_storage_bucket.state["primary"]', False),
         ):
             with self.subTest(address=address):
                 resource = self.resource(
@@ -2004,9 +1924,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "force_destroy": False,
                         "versioning": [{"enabled": True}],
                         "encryption": [{"default_kms_key_name": None}],
-                        "soft_delete_policy": [
-                            {"retention_duration_seconds": 2592000}
-                        ],
+                        "soft_delete_policy": [{"retention_duration_seconds": 2592000}],
                         "lifecycle_rule": [
                             {
                                 "action": [{"type": "Delete"}],
@@ -2315,9 +2233,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                             "member": member,
                         },
                     )
-                    resource["address"] = (
-                        f'google_project_iam_member.{name}["{logical}:{role}"]'
-                    )
+                    resource["address"] = f'google_project_iam_member.{name}["{logical}:{role}"]'
                     resources.append(resource)
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2331,14 +2247,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "project": "bootstrap-signing",
                 "role": "roles/cloudkms.publicKeyViewer",
                 "member": (
-                    "serviceAccount:bootstrap-plan@bootstrap-state-root."
-                    "iam.gserviceaccount.com"
+                    "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com"
                 ),
             },
         )
         binding["address"] = (
-            'google_project_iam_member.plan_read['
-            '"signing:roles/cloudkms.publicKeyViewer"]'
+            'google_project_iam_member.plan_read["signing:roles/cloudkms.publicKeyViewer"]'
         )
         result = self.check_plan([signing_project, binding])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2361,14 +2275,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     value[1].update(
                         {
                             "address": (
-                                'google_project_iam_member.plan_read['
+                                "google_project_iam_member.plan_read["
                                 '"state:roles/cloudkms.publicKeyViewer"]'
                             )
                         }
                     ),
-                    value[1]["change"]["after"].update(
-                        {"project": "bootstrap-state-root"}
-                    ),
+                    value[1]["change"]["after"].update({"project": "bootstrap-state-root"}),
                 ),
             ),
             (
@@ -2376,7 +2288,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 lambda value: value[1].update(
                     {
                         "address": (
-                            'google_project_iam_member.apply_administration['
+                            "google_project_iam_member.apply_administration["
                             '"signing:roles/cloudkms.publicKeyViewer"]'
                         )
                     }
@@ -2388,14 +2300,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     value[1].update(
                         {
                             "address": (
-                                'google_project_iam_member.plan_read['
+                                "google_project_iam_member.plan_read["
                                 '"signing:roles/cloudkms.signerVerifier"]'
                             )
                         }
                     ),
-                    value[1]["change"]["after"].update(
-                        {"role": "roles/cloudkms.signerVerifier"}
-                    ),
+                    value[1]["change"]["after"].update({"role": "roles/cloudkms.signerVerifier"}),
                 ),
             ),
         )
@@ -2442,9 +2352,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
         }
         resources = [
-            self.replication_custom_role(
-                "module.root_state", instance, role_id, permissions
-            )
+            self.replication_custom_role("module.root_state", instance, role_id, permissions)
             for instance, (role_id, permissions) in contracts.items()
         ]
         result = self.check_plan(resources)
@@ -2457,10 +2365,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "storage.objects.get",
         ]
         mutations = (
-            ("address", "module.root_state.google_project_iam_custom_role.replication[\"source_bucket_backdoor\"]"),
+            (
+                "address",
+                'module.root_state.google_project_iam_custom_role.replication["source_bucket_backdoor"]',
+            ),
             ("role_id", "bootstrapStateReplicationDestination"),
             ("stage", "BETA"),
-            ("permissions", permissions + ["storage.objects.delete"]),
+            ("permissions", [*permissions, "storage.objects.delete"]),
             ("permissions", permissions[:-1]),
         )
         for field, value in mutations:
@@ -2513,9 +2424,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "member": "group:recovery-admins@example.com",
                 },
             )
-            binding["address"] = (
-                f'google_project_iam_member.recovery_administration["{role}"]'
-            )
+            binding["address"] = f'google_project_iam_member.recovery_administration["{role}"]'
             bindings.append(binding)
         result = self.check_plan([project, *bindings])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2527,14 +2436,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "organization_id": "123456789",
                 "billing_account": "ABCDEF-123456-ABCDEF",
                 "projects": {},
-                "recovery_administrator_principal": (
-                    "group:recovery-admins@example.com"
-                ),
+                "recovery_administrator_principal": ("group:recovery-admins@example.com"),
             }
         )
         declarations = {
-            key: value["versions"]
-            for key, value in bootstrap["signing"]["keys"].items()
+            key: value["versions"] for key, value in bootstrap["signing"]["keys"].items()
         }
         strict_document = {
             "format_version": "1.2",
@@ -2563,23 +2469,15 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "recovery-administration bindings must exactly equal the single "
             "compiled recovery-administrator group"
         )
-        result = self.run_plan_document(
-            "plan-check", strict_document, "--root", "root-trust"
-        )
+        result = self.run_plan_document("plan-check", strict_document, "--root", "root-trust")
         self.assertNotIn(diagnostic, result.stderr)
         for binding in bindings:
-            binding["change"]["after"]["member"] = (
-                "group:unreviewed-recovery-admins@example.com"
-            )
-        result = self.run_plan_document(
-            "plan-check", strict_document, "--root", "root-trust"
-        )
+            binding["change"]["after"]["member"] = "group:unreviewed-recovery-admins@example.com"
+        result = self.run_plan_document("plan-check", strict_document, "--root", "root-trust")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(diagnostic, result.stderr)
         for binding in bindings:
-            binding["change"]["after"]["member"] = (
-                "group:recovery-admins@example.com"
-            )
+            binding["change"]["after"]["member"] = "group:recovery-admins@example.com"
 
         bindings[0]["change"]["after"]["project"] = "bootstrap-audit"
         result = self.check_plan([project, *bindings])
@@ -2594,9 +2492,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("recovery-administrator group email", result.stderr)
 
-        bindings[0]["change"]["after"]["member"] = (
-            "group:recovery-admins@example.com"
-        )
+        bindings[0]["change"]["after"]["member"] = "group:recovery-admins@example.com"
         result = self.check_plan([project, *bindings[:-1]])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exact recovery-administration role set", result.stderr)
@@ -2669,8 +2565,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             metadata_binding["address"] = (
-                "module.recovery_exports.google_storage_bucket_iam_member."
-                f'plan_read["{bucket}"]'
+                f'module.recovery_exports.google_storage_bucket_iam_member.plan_read["{bucket}"]'
             )
             bindings.append(metadata_binding)
 
@@ -2709,9 +2604,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         bindings[0]["change"]["after"]["member"] = (
             "serviceAccount:bootstrap-plan@bootstrap-identity.iam.gserviceaccount.com"
         )
-        metadata_role["change"]["after"]["permissions"].append(
-            "storage.objects.list"
-        )
+        metadata_role["change"]["after"]["permissions"].append("storage.objects.list")
         result = self.check_plan([metadata_role, object_role, *bindings])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
@@ -2733,9 +2626,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "deleted": False,
             },
         )
-        plan_lock_role["address"] = (
-            "module.root_state.google_project_iam_custom_role.plan_lock"
-        )
+        plan_lock_role["address"] = "module.root_state.google_project_iam_custom_role.plan_lock"
         plan_access = {
             "primary-plan-state": (
                 "bootstrap-primary-state",
@@ -2800,8 +2691,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     {
                         "title": title,
                         "expression": (
-                            "resource.name == "
-                            f"'projects/_/buckets/{bucket}/objects/{object_name}'"
+                            f"resource.name == 'projects/_/buckets/{bucket}/objects/{object_name}'"
                         ),
                     }
                 ]
@@ -2820,8 +2710,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             resource["address"] = (
-                "module.root_state.google_storage_bucket_iam_member."
-                f'backend_access["{instance}"]'
+                f'module.root_state.google_storage_bucket_iam_member.backend_access["{instance}"]'
             )
             resources.append(resource)
         result = self.check_plan(resources)
@@ -2856,9 +2745,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertIn("object-scoped IAM condition", result.stderr)
         recovery_state["change"]["after"]["condition"] = recovery_condition
 
-        plan_lock_role["change"]["after"]["permissions"].append(
-            "storage.objects.list"
-        )
+        plan_lock_role["change"]["after"]["permissions"].append("storage.objects.list")
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
@@ -3012,9 +2899,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         result = self.check_plan([resource])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        resource["change"]["after_unknown"]["replication_spec"][0][
-            "transfer_options"
-        ] = [{"delete_objects_unique_in_sink": True}]
+        resource["change"]["after_unknown"]["replication_spec"][0]["transfer_options"] = [
+            {"delete_objects_unique_in_sink": True}
+        ]
         result = self.check_plan([resource])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("delete_objects_unique_in_sink disabled", result.stderr)
@@ -3113,15 +3000,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         for name, (role_id, permissions, indexed) in contracts.items():
             keys = ("root-trust", "recovery-plane") if indexed else (None,)
             for key in keys:
-                resources.append(
-                    self.state_export_custom_role(name, role_id, permissions, key)
-                )
+                resources.append(self.state_export_custom_role(name, role_id, permissions, key))
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        resources[0]["change"]["after"]["permissions"].append(
-            "storage.objects.list"
-        )
+        resources[0]["change"]["after"]["permissions"].append("storage.objects.list")
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
@@ -3148,13 +3031,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 },
             )
             service_account["address"] = (
-                "module.recovery_exports.google_service_account.state_export"
-                f'["{key}"]'
+                f'module.recovery_exports.google_service_account.state_export["{key}"]'
             )
-            service_account["change"]["after_unknown"] = {
-                field: True
-                for field in ("email", "id", "member", "name", "unique_id")
-            }
+            service_account["change"]["after_unknown"] = dict.fromkeys(
+                ("email", "id", "member", "name", "unique_id"), True
+            )
             resources.append(service_account)
 
             storage_agent = self.resource(
@@ -3203,13 +3084,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ("root-trust", "bootstrap-state-root", "bootstrap-primary-state"),
             ("recovery-plane", "bootstrap-recovery", "bootstrap-recovery-primary"),
         ):
-            export_email = (
-                f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"
-            )
+            export_email = f"bootstrap-recovery-export@{project}.iam.gserviceaccount.com"
             export_member = f"serviceAccount:{export_email}"
-            service_account_id = (
-                f"projects/{project}/serviceAccounts/{export_email}"
-            )
+            service_account_id = f"projects/{project}/serviceAccounts/{export_email}"
             destination_bucket = "bootstrap-recovery-recovery-exports"
             definitions = (
                 (
@@ -3313,10 +3190,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             )
             for resource_type, name, after in definitions:
                 resource = self.resource(resource_type, ["create"], after)
-                resource["address"] = (
-                    f"module.recovery_exports.{resource_type}.{name}"
-                    f'["{key}"]'
-                )
+                resource["address"] = f'module.recovery_exports.{resource_type}.{name}["{key}"]'
                 resources.append(resource)
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -3342,11 +3216,31 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         mutations = (
-            ("wide-prefix", lambda after: after["replication_spec"][0]["object_conditions"][0].update({"include_prefixes": ["root-trust/"]})),
+            (
+                "wide-prefix",
+                lambda after: after["replication_spec"][0]["object_conditions"][0].update(
+                    {"include_prefixes": ["root-trust/"]}
+                ),
+            ),
             ("managed-agent", lambda after: after.update({"service_account": ""})),
-            ("same-bucket", lambda after: after["replication_spec"][0]["gcs_data_sink"][0].update({"bucket_name": "bootstrap-primary-state"})),
-            ("delete", lambda after: after["replication_spec"][0]["transfer_options"][0].update({"delete_objects_unique_in_sink": True})),
-            ("preserve-kms", lambda after: after["replication_spec"][0]["transfer_options"][0]["metadata_options"][0].update({"kms_key": "KMS_KEY_PRESERVE"})),
+            (
+                "same-bucket",
+                lambda after: after["replication_spec"][0]["gcs_data_sink"][0].update(
+                    {"bucket_name": "bootstrap-primary-state"}
+                ),
+            ),
+            (
+                "delete",
+                lambda after: after["replication_spec"][0]["transfer_options"][0].update(
+                    {"delete_objects_unique_in_sink": True}
+                ),
+            ),
+            (
+                "preserve-kms",
+                lambda after: after["replication_spec"][0]["transfer_options"][0][
+                    "metadata_options"
+                ][0].update({"kms_key": "KMS_KEY_PRESERVE"}),
+            ),
         )
         for name, mutate in mutations:
             with self.subTest(name=name):
@@ -3414,47 +3308,36 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "source": "",
                 },
             )
-            resource["address"] = (
-                "module.recovery_exports.google_storage_bucket_object."
-                f"{name}"
-            )
+            resource["address"] = f"module.recovery_exports.google_storage_bucket_object.{name}"
             resources.append(resource)
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
 
         collocated = self.public_trust_metadata()
-        collocated["federation_providers"]["github-recovery"] = collocated[
-            "federation_providers"
-        ]["github-recovery"].replace("projects/987654321/", "projects/123456789/")
+        collocated["federation_providers"]["github-recovery"] = collocated["federation_providers"][
+            "github-recovery"
+        ].replace("projects/987654321/", "projects/123456789/")
         resources[0]["change"]["after"]["content"] = json.dumps(collocated)
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("public trust contract", result.stderr)
 
-        resources[0]["change"]["after"]["content"] = json.dumps(
-            self.public_trust_metadata()
-        )
+        resources[0]["change"]["after"]["content"] = json.dumps(self.public_trust_metadata())
         metadata = json.loads(resources[0]["change"]["after"]["content"])
-        removed_digest = metadata["manifest_digests"].pop(
-            "manifests/trust-anchors.yaml"
-        )
+        removed_digest = metadata["manifest_digests"].pop("manifests/trust-anchors.yaml")
         resources[0]["change"]["after"]["content"] = json.dumps(metadata)
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("public trust contract", result.stderr)
 
         metadata["manifest_digests"]["manifests/trust-anchors.yaml"] = removed_digest
-        metadata["state_backends"]["root-trust"]["bucket"] = (
-            "bootstrap-other-primary-state"
-        )
+        metadata["state_backends"]["root-trust"]["bucket"] = "bootstrap-other-primary-state"
         resources[0]["change"]["after"]["content"] = json.dumps(metadata)
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("agree on the root-trust state coordinates", result.stderr)
 
-        resources[0]["change"]["after"]["content"] = json.dumps(
-            self.public_trust_metadata()
-        )
+        resources[0]["change"]["after"]["content"] = json.dumps(self.public_trust_metadata())
 
         resources[0]["change"]["after"]["deletion_policy"] = "DELETE"
         result = self.check_plan(resources)
@@ -3463,7 +3346,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_versions_and_time_scoped_signers_are_exact(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
+        for key in (
+            "audit-anchor",
+            "bootstrap-handoff",
+            "connected-observation-evidence",
+            "github-config-plan-evidence",
+            "infrastructure-export",
+            "recovery-evidence",
+        ):
             resources.extend([self.signing_crypto_key(key), self.signing_version(key)])
             if key not in {"connected-observation-evidence", "infrastructure-export"}:
                 resources.append(self.signing_binding(key))
@@ -3496,9 +3386,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "actions": ["read"],
                 "before": None,
                 "after": {},
-                "after_unknown": {
-                    field: True
-                    for field in (
+                "after_unknown": dict.fromkeys(
+                    (
                         "algorithm",
                         "crypto_key",
                         "id",
@@ -3507,8 +3396,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "public_key",
                         "state",
                         "version",
-                    )
-                },
+                    ),
+                    True,
+                ),
             }
         )
         planned["values"] = None
@@ -3526,9 +3416,8 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "actions": ["read"],
                 "before": prior,
                 "after": {"crypto_key": crypto_key},
-                "after_unknown": {
-                    field: True
-                    for field in (
+                "after_unknown": dict.fromkeys(
+                    (
                         "algorithm",
                         "id",
                         "name",
@@ -3536,13 +3425,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "public_key",
                         "state",
                         "version",
-                    )
-                },
+                    ),
+                    True,
+                ),
             }
         )
         planned["values"] = {
             "crypto_key": crypto_key,
-            **{field: None for field in resource["change"]["after_unknown"]},
+            **dict.fromkeys(resource["change"]["after_unknown"]),
         }
         result = self.run_plan_document(
             "plan-resource-check",
@@ -3553,9 +3443,10 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
     def test_active_signing_version_rejects_malformed_provider_shapes(self):
         resource, planned = self.active_signing_data()
         base = self.active_signing_document(resource, planned)
-        planned_path = lambda value: value["planned_values"]["root_module"][
-            "child_modules"
-        ][0]["resources"][0]
+
+        def planned_path(value):
+            return value["planned_values"]["root_module"]["child_modules"][0]["resources"][0]
+
         mutations = (
             (
                 "string-version",
@@ -3578,11 +3469,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             (
                 "provider-id-equals-name",
                 lambda value: value["resource_changes"][1]["change"]["after"].update(
-                    {
-                        "id": value["resource_changes"][1]["change"]["after"][
-                            "name"
-                        ]
-                    }
+                    {"id": value["resource_changes"][1]["change"]["after"]["name"]}
                 ),
             ),
             (
@@ -3593,15 +3480,15 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "multiple-public-keys",
-                lambda value: value["resource_changes"][1]["change"]["after"][
-                    "public_key"
-                ].append(copy.deepcopy(value["resource_changes"][1]["change"]["after"]["public_key"][0])),
+                lambda value: value["resource_changes"][1]["change"]["after"]["public_key"].append(
+                    copy.deepcopy(value["resource_changes"][1]["change"]["after"]["public_key"][0])
+                ),
             ),
             (
                 "malformed-pem",
-                lambda value: value["resource_changes"][1]["change"]["after"][
-                    "public_key"
-                ][0].update({"pem": "not a public key"}),
+                lambda value: value["resource_changes"][1]["change"]["after"]["public_key"][
+                    0
+                ].update({"pem": "not a public key"}),
             ),
             (
                 "resolved-unknown",
@@ -3617,9 +3504,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "planned-value-mismatch",
-                lambda value: planned_path(value)["values"].update(
-                    {"state": "DISABLED"}
-                ),
+                lambda value: planned_path(value)["values"].update({"state": "DISABLED"}),
             ),
             (
                 "wrong-planned-provider",
@@ -3633,9 +3518,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "duplicate-planned-address",
-                lambda value: value["planned_values"]["root_module"][
-                    "child_modules"
-                ][0]["resources"].append(copy.deepcopy(planned_path(value))),
+                lambda value: value["planned_values"]["root_module"]["child_modules"][0][
+                    "resources"
+                ].append(copy.deepcopy(planned_path(value))),
             ),
         )
         for name, mutate in mutations:
@@ -3665,17 +3550,22 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "actions": ["no-op"],
                 "before": None,
                 "after": {},
-                "after_unknown": {
-                    field: True for field in (
-                        "algorithm", "crypto_key", "id", "name",
-                        "protection_level", "public_key", "state", "version",
-                    )
-                },
+                "after_unknown": dict.fromkeys(
+                    (
+                        "algorithm",
+                        "crypto_key",
+                        "id",
+                        "name",
+                        "protection_level",
+                        "public_key",
+                        "state",
+                        "version",
+                    ),
+                    True,
+                ),
             }
         )
-        planned["values"] = {
-            field: None for field in resource["change"]["after_unknown"]
-        }
+        planned["values"] = dict.fromkeys(resource["change"]["after_unknown"])
         result = self.run_plan_document(
             "plan-resource-check",
             self.active_signing_document(resource, planned),
@@ -3690,33 +3580,25 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         mutations = (
             (
                 "extra-unknown",
-                lambda value: value["resource_changes"][1]["change"][
-                    "after_unknown"
-                ].update({"condition": [{"expression": True, "title": True}]}),
+                lambda value: value["resource_changes"][1]["change"]["after_unknown"].update(
+                    {"condition": [{"expression": True, "title": True}]}
+                ),
             ),
             (
                 "wrong-window",
-                lambda value: value["variables"]["bootstrap"]["value"]["signing"][
-                    "keys"
-                ]["audit-anchor"]["versions"]["v20260829"].update(
-                    {"rotation_deadline": "2026-12-01T00:00:00Z"}
-                ),
+                lambda value: value["variables"]["bootstrap"]["value"]["signing"]["keys"][
+                    "audit-anchor"
+                ]["versions"]["v20260829"].update({"rotation_deadline": "2026-12-01T00:00:00Z"}),
             ),
             (
                 "missing-reference",
-                lambda value: value["configuration"]["root_module"]["module_calls"][
-                    "signing_root"
-                ]["module"]["resources"][0]["expressions"]["condition"][0][
-                    "expression"
-                ][
-                    "references"
-                ].pop(),
+                lambda value: value["configuration"]["root_module"]["module_calls"]["signing_root"][
+                    "module"
+                ]["resources"][0]["expressions"]["condition"][0]["expression"]["references"].pop(),
             ),
             (
                 "not-create",
-                lambda value: value["resource_changes"][1]["change"].update(
-                    {"actions": ["no-op"]}
-                ),
+                lambda value: value["resource_changes"][1]["change"].update({"actions": ["no-op"]}),
             ),
             (
                 "missing-version",
@@ -3762,11 +3644,20 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_allows_prestage_then_concrete_activation(self):
         prestage_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            prestage_resources.extend([
-                self.signing_version(key, actions=["no-op"]),
-                self.unknown_signing_version(key),
-            ])
+        for key in (
+            "audit-anchor",
+            "bootstrap-handoff",
+            "connected-observation-evidence",
+            "github-config-plan-evidence",
+            "infrastructure-export",
+            "recovery-evidence",
+        ):
+            prestage_resources.extend(
+                [
+                    self.signing_version(key, actions=["no-op"]),
+                    self.unknown_signing_version(key),
+                ]
+            )
             if key not in {"connected-observation-evidence", "infrastructure-export"}:
                 prestage_resources.append(self.signing_binding(key, actions=["no-op"]))
         prestage = {
@@ -3779,25 +3670,36 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         activation_resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            activation_resources.extend([
-                self.signing_version(key, actions=["no-op"], state="DISABLED"),
-                self.signing_version(
-                    key,
-                    actions=["no-op"],
-                    version_ref="v20261126",
-                    version_number="2",
-                ),
-            ])
+        for key in (
+            "audit-anchor",
+            "bootstrap-handoff",
+            "connected-observation-evidence",
+            "github-config-plan-evidence",
+            "infrastructure-export",
+            "recovery-evidence",
+        ):
+            activation_resources.extend(
+                [
+                    self.signing_version(key, actions=["no-op"], state="DISABLED"),
+                    self.signing_version(
+                        key,
+                        actions=["no-op"],
+                        version_ref="v20261126",
+                        version_number="2",
+                    ),
+                ]
+            )
             if key not in {"connected-observation-evidence", "infrastructure-export"}:
-                activation_resources.append(self.signing_binding(
-                    key,
-                    version_ref="v20261126",
-                    version_number="2",
-                    activation_window_start="2026-11-26T00:00:00Z",
-                    rotation_deadline="2027-02-24T00:00:00Z",
-                    actions=["update"],
-                ))
+                activation_resources.append(
+                    self.signing_binding(
+                        key,
+                        version_ref="v20261126",
+                        version_number="2",
+                        activation_window_start="2026-11-26T00:00:00Z",
+                        rotation_deadline="2027-02-24T00:00:00Z",
+                        actions=["update"],
+                    )
+                )
         activation = {
             "format_version": "1.2",
             "terraform_version": "1.12.6",
@@ -3809,11 +3711,20 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_rejects_undeclared_gap_and_window_mutation(self):
         resources = []
-        for key in ("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"):
-            resources.extend([
-                self.signing_version(key, actions=["no-op"]),
-                self.unknown_signing_version(key),
-            ])
+        for key in (
+            "audit-anchor",
+            "bootstrap-handoff",
+            "connected-observation-evidence",
+            "github-config-plan-evidence",
+            "infrastructure-export",
+            "recovery-evidence",
+        ):
+            resources.extend(
+                [
+                    self.signing_version(key, actions=["no-op"]),
+                    self.unknown_signing_version(key),
+                ]
+            )
             if key not in {"connected-observation-evidence", "infrastructure-export"}:
                 resources.append(self.signing_binding(key, actions=["no-op"]))
         base = {
@@ -3824,9 +3735,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         }
 
         def replace_declared_version(value, key, new_ref, start, deadline):
-            versions = value["variables"]["bootstrap"]["value"]["signing"][
-                "keys"
-            ][key]["versions"]
+            versions = value["variables"]["bootstrap"]["value"]["signing"]["keys"][key]["versions"]
             versions.pop("v20261126")
             versions[new_ref] = {
                 "activation_window_start": start,
@@ -3834,13 +3743,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             }
             old_address = (
                 "module.signing_root.google_kms_crypto_key_version.signing"
-                f'[{json.dumps(f"{key}:v20261126")}]'
+                f"[{json.dumps(f'{key}:v20261126')}]"
             )
             for resource in value["resource_changes"]:
                 if resource["address"] == old_address:
                     resource["address"] = (
                         "module.signing_root.google_kms_crypto_key_version.signing"
-                        f'[{json.dumps(f"{key}:{new_ref}")}]'
+                        f"[{json.dumps(f'{key}:{new_ref}')}]"
                     )
 
         mutations = (
@@ -3874,11 +3783,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "deadline",
-                lambda value: value["variables"]["bootstrap"]["value"]["signing"][
-                    "keys"
-                ]["bootstrap-handoff"]["versions"]["v20261126"].update(
-                    {"rotation_deadline": "2027-02-26T00:00:00Z"}
-                ),
+                lambda value: value["variables"]["bootstrap"]["value"]["signing"]["keys"][
+                    "bootstrap-handoff"
+                ]["versions"]["v20261126"].update({"rotation_deadline": "2027-02-26T00:00:00Z"}),
             ),
             (
                 "historical-update",
@@ -3902,7 +3809,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 [
                     {
                         "title": "sign-any-version",
-                        "expression": self.signing_binding("audit-anchor")["change"]["after"]["condition"][0]["expression"],
+                        "expression": self.signing_binding("audit-anchor")["change"]["after"][
+                            "condition"
+                        ][0]["expression"],
                     }
                 ],
             ),
@@ -3920,9 +3829,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 [
                     {
                         "title": "sign-audit-anchor-v20260829-within-window",
-                        "expression": self.signing_binding("audit-anchor")["change"]["after"]["condition"][0]["expression"].replace(
-                            "2026-11-27T00:00:00Z", "2026-11-28T00:00:00Z"
-                        ),
+                        "expression": self.signing_binding("audit-anchor")["change"]["after"][
+                            "condition"
+                        ][0]["expression"].replace("2026-11-27T00:00:00Z", "2026-11-28T00:00:00Z"),
                     }
                 ],
             ),
@@ -3987,9 +3896,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        custom_role["change"]["after"]["permissions"].append(
-            "cloudkms.cryptoKeyVersions.list"
-        )
+        custom_role["change"]["after"]["permissions"].append("cloudkms.cryptoKeyVersions.list")
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
@@ -4010,22 +3917,17 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "member": "group:root-trust-administrators@example.com",
             },
         )
-        resource["address"] = (
-            "google_organization_iam_member.apply_logging_config_writer"
-        )
+        resource["address"] = "google_organization_iam_member.apply_logging_config_writer"
         result = self.check_plan([resource])
         self.assertEqual(result.returncode, 0, result.stderr)
 
         resource["change"]["after"]["member"] = (
-            "serviceAccount:bootstrap-apply@bootstrap-state-root."
-            "iam.gserviceaccount.com"
+            "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com"
         )
         result = self.check_plan([resource])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("never bootstrap-apply", result.stderr)
-        resource["change"]["after"]["member"] = (
-            "group:root-trust-administrators@example.com"
-        )
+        resource["change"]["after"]["member"] = "group:root-trust-administrators@example.com"
 
         resource["change"]["after"]["role"] = "roles/logging.admin"
         result = self.check_plan([resource])
@@ -4132,9 +4034,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "mapping",
-                lambda provider, binding: provider["change"]["after"][
-                    "attribute_mapping"
-                ].update({"google.subject": "assertion.actor"}),
+                lambda provider, binding: provider["change"]["after"]["attribute_mapping"].update(
+                    {"google.subject": "assertion.actor"}
+                ),
             ),
             (
                 "principal-mismatch",
@@ -4164,10 +4066,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         mutations = (
             (
                 "arbitrary-audience",
-                lambda writer, writer_binding, verifier: writer["change"]["after"]
-                ["oidc"][0].update(
-                    {"allowed_audiences": ["https://attacker.example/audience"]}
-                ),
+                lambda writer, writer_binding, verifier: writer["change"]["after"]["oidc"][
+                    0
+                ].update({"allowed_audiences": ["https://attacker.example/audience"]}),
             ),
             (
                 "repository-allowlist",
@@ -4226,9 +4127,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ),
             (
                 "principal-role",
-                lambda writer, writer_binding, verifier: writer_binding["change"][
-                    "after"
-                ].update(
+                lambda writer, writer_binding, verifier: writer_binding["change"]["after"].update(
                     {
                         "member": writer_binding["change"]["after"]["member"].replace(
                             "/writer", "/verifier"
@@ -4285,14 +4184,20 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 {
                     "attribute_condition": provider["change"]["after"][
                         "attribute_condition"
-                    ].replace("repository_visibility == 'public'", "repository_visibility != 'public'")
+                    ].replace(
+                        "repository_visibility == 'public'", "repository_visibility != 'public'"
+                    )
                 }
             ),
-            lambda provider, binding: provider["change"]["after"][
-                "attribute_mapping"
-            ].update({"google.subject": "assertion.sub"}),
+            lambda provider, binding: provider["change"]["after"]["attribute_mapping"].update(
+                {"google.subject": "assertion.sub"}
+            ),
             lambda provider, binding: binding["change"]["after"].update(
-                {"member": binding["change"]["after"]["member"].replace("production-apply", "production-plan")}
+                {
+                    "member": binding["change"]["after"]["member"].replace(
+                        "production-apply", "production-plan"
+                    )
+                }
             ),
         )
         for mutate in mutations:
@@ -4332,9 +4237,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "oidc": [
                     {
                         "issuer_uri": "https://agent.buildkite.com",
-                        "allowed_audiences": [
-                            "https://buildkite.com/mindclade/bootstrap"
-                        ],
+                        "allowed_audiences": ["https://buildkite.com/mindclade/bootstrap"],
                     }
                 ],
             },
@@ -4365,9 +4268,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "oidc": [
                     {
                         "issuer_uri": "https://gitops.example.com",
-                        "allowed_audiences": [
-                            "https://gitops.example.com/mindclade/bootstrap"
-                        ],
+                        "allowed_audiences": ["https://gitops.example.com/mindclade/bootstrap"],
                     }
                 ],
             },
@@ -4378,30 +4279,32 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         result = self.check_plan([identity, buildkite, gitops])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        gitops["change"]["after"]["attribute_condition"] = gitops["change"][
-            "after"
-        ]["attribute_condition"].replace("assertion.sub ==", "assertion.subject ==")
+        gitops["change"]["after"]["attribute_condition"] = gitops["change"]["after"][
+            "attribute_condition"
+        ].replace("assertion.sub ==", "assertion.subject ==")
         result = self.check_plan([identity, buildkite, gitops])
         self.assertNotEqual(result.returncode, 0)
 
-        gitops["change"]["after"]["attribute_condition"] = gitops["change"][
-            "after"
-        ]["attribute_condition"].replace("assertion.subject ==", "assertion.sub ==")
-        buildkite["change"]["after"]["attribute_condition"] = buildkite["change"][
-            "after"
-        ]["attribute_condition"].replace(
+        gitops["change"]["after"]["attribute_condition"] = gitops["change"]["after"][
+            "attribute_condition"
+        ].replace("assertion.subject ==", "assertion.sub ==")
+        buildkite["change"]["after"]["attribute_condition"] = buildkite["change"]["after"][
+            "attribute_condition"
+        ].replace(
             "assertion.sub == '0184990a-4782-42b5-afc1-16715b10b8ff'",
             "assertion.sub == 'another-pipeline'",
         )
         result = self.check_plan([identity, buildkite, gitops])
         self.assertNotEqual(result.returncode, 0)
 
-        buildkite["change"]["after"]["attribute_condition"] = buildkite["change"][
-            "after"
-        ]["attribute_condition"].replace(
-            "assertion.sub == 'another-pipeline'",
-            "assertion.sub == '0184990a-4782-42b5-afc1-16715b10b8ff'",
-        ).replace("assertion.build_branch == 'main'", "assertion.build_branch == 'feature'")
+        buildkite["change"]["after"]["attribute_condition"] = (
+            buildkite["change"]["after"]["attribute_condition"]
+            .replace(
+                "assertion.sub == 'another-pipeline'",
+                "assertion.sub == '0184990a-4782-42b5-afc1-16715b10b8ff'",
+            )
+            .replace("assertion.build_branch == 'main'", "assertion.build_branch == 'feature'")
+        )
         result = self.check_plan([identity, buildkite, gitops])
         self.assertNotEqual(result.returncode, 0)
 
@@ -4460,9 +4363,9 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
                 opposite = "apply" if identity == "plan" else "plan"
-                binding["change"]["after"]["member"] = binding["change"]["after"][
-                    "member"
-                ].replace(f"/{identity}", f"/{opposite}")
+                binding["change"]["after"]["member"] = binding["change"]["after"]["member"].replace(
+                    f"/{identity}", f"/{opposite}"
+                )
                 result = self.check_plan([identity_project, binding])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("provider-owned github-config identity", result.stderr)
@@ -4530,9 +4433,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "disable_on_destroy": False,
             },
         )
-        root_sts["address"] = (
-            'google_project_service.state["root_state:sts.googleapis.com"]'
-        )
+        root_sts["address"] = 'google_project_service.state["root_state:sts.googleapis.com"]'
         result = self.check_plan(
             [self.project_resource("root_state", "bootstrap-state-root"), root_sts]
         )
@@ -4634,9 +4535,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "stage": "GA",
             },
         )
-        role["address"] = (
-            'module.audit_root.google_project_iam_custom_role.plan_read["primary"]'
-        )
+        role["address"] = 'module.audit_root.google_project_iam_custom_role.plan_read["primary"]'
         role["change"]["after_unknown"] = {"deleted": True}
         binding = self.resource(
             "google_project_iam_member",
@@ -4645,14 +4544,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "project": "bootstrap-audit",
                 "role": "projects/bootstrap-audit/roles/bootstrapAuditPlanRead",
                 "member": (
-                    "serviceAccount:bootstrap-plan@bootstrap-state-root."
-                    "iam.gserviceaccount.com"
+                    "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com"
                 ),
             },
         )
-        binding["address"] = (
-            'module.audit_root.google_project_iam_member.plan_read["primary"]'
-        )
+        binding["address"] = 'module.audit_root.google_project_iam_member.plan_read["primary"]'
 
         result = self.check_plan([audit, role, binding])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -4684,19 +4580,15 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         role["change"]["after"]["permissions"].pop()
 
         binding["change"]["after"]["member"] = (
-            "serviceAccount:bootstrap-apply@bootstrap-state-root."
-            "iam.gserviceaccount.com"
+            "serviceAccount:bootstrap-apply@bootstrap-state-root.iam.gserviceaccount.com"
         )
         result = self.check_plan([audit, role, binding])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bootstrap-plan", result.stderr)
         binding["change"]["after"]["member"] = (
-            "serviceAccount:bootstrap-plan@bootstrap-state-root."
-            "iam.gserviceaccount.com"
+            "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com"
         )
-        binding["change"]["after"]["role"] = (
-            "projects/other-audit/roles/bootstrapAuditPlanRead"
-        )
+        binding["change"]["after"]["role"] = "projects/other-audit/roles/bootstrapAuditPlanRead"
         result = self.check_plan([audit, role, binding])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exact audit configuration-read role", result.stderr)
@@ -4732,9 +4624,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "stage": "GA",
             },
         )
-        recovery_role["address"] = (
-            "google_organization_iam_custom_role.recovery_sink_read"
-        )
+        recovery_role["address"] = "google_organization_iam_custom_role.recovery_sink_read"
         recovery_role["change"]["after_unknown"] = {"deleted": True}
         apply_role = self.resource(
             "google_organization_iam_custom_role",
@@ -4756,14 +4646,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             (
                 "google_organization_iam_member.plan_read",
                 "organizations/123456789/roles/bootstrapOrganizationPlanRead",
-                "serviceAccount:bootstrap-plan@bootstrap-state-root."
-                "iam.gserviceaccount.com",
+                "serviceAccount:bootstrap-plan@bootstrap-state-root.iam.gserviceaccount.com",
             ),
             (
                 "google_organization_iam_member.recovery_sink_read",
                 "organizations/123456789/roles/bootstrapRecoverySinkRead",
-                "serviceAccount:bootstrap-recovery@bootstrap-state-root."
-                "iam.gserviceaccount.com",
+                "serviceAccount:bootstrap-recovery@bootstrap-state-root.iam.gserviceaccount.com",
             ),
             (
                 "google_organization_iam_member.apply_iam",
@@ -4800,9 +4688,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     custom_role["change"]["actions"] = actions
                     result = self.check_plan(resources)
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(
-                        "deleted state must be explicit false", result.stderr
-                    )
+                    self.assertIn("deleted state must be explicit false", result.stderr)
             custom_role["change"]["actions"] = ["create"]
             with self.subTest(address=custom_role["address"], field="stage"):
                 custom_role["change"]["after_unknown"] = {
@@ -4814,17 +4700,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 self.assertIn("stage must be explicit", result.stderr)
                 custom_role["change"]["after_unknown"] = {"deleted": True}
 
-        recovery_role["change"]["after"]["permissions"].append(
-            "logging.logEntries.list"
-        )
+        recovery_role["change"]["after"]["permissions"].append("logging.logEntries.list")
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
         recovery_role["change"]["after"]["permissions"].pop()
 
-        apply_role["change"]["after"]["permissions"].append(
-            "resourcemanager.projects.setIamPolicy"
-        )
+        apply_role["change"]["after"]["permissions"].append("resourcemanager.projects.setIamPolicy")
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("permissions must exactly match", result.stderr)
@@ -4867,15 +4749,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         )
         reader["address"] = (
-            'module.audit_root.google_project_iam_member.reader['
+            "module.audit_root.google_project_iam_member.reader["
             '"primary:group:security@example.com"]'
         )
         result = self.check_plan([audit, reader])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        original_condition = json.loads(
-            json.dumps(reader["change"]["after"]["condition"])
-        )
+        original_condition = json.loads(json.dumps(reader["change"]["after"]["condition"]))
         for condition, after_unknown in (
             ([], {}),
             (
@@ -4943,8 +4823,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_all_audit_sinks_share_one_exact_bucket_scoped_writer(self):
         writer_identity = (
-            "serviceAccount:service-org-123456789@"
-            "gcp-sa-logging.iam.gserviceaccount.com"
+            "serviceAccount:service-org-123456789@gcp-sa-logging.iam.gserviceaccount.com"
         )
         contracts = {
             "admin-activity": (
@@ -5012,10 +4891,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "writer_identity": writer_identity,
                 },
             )
-            sink["address"] = (
-                'module.audit_root.google_logging_organization_sink.audit['
-                f'"{key}"]'
-            )
+            sink["address"] = f'module.audit_root.google_logging_organization_sink.audit["{key}"]'
             sinks.append(sink)
 
         writers = []
@@ -5053,10 +4929,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     ],
                 },
             )
-            writer["address"] = (
-                'module.audit_root.google_project_iam_member.sink_writer['
-                f'"{key}"]'
-            )
+            writer["address"] = f'module.audit_root.google_project_iam_member.sink_writer["{key}"]'
             writers.append(writer)
 
         projects = [
@@ -5075,8 +4948,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         writers[0]["change"]["after"]["condition"] = original_condition
 
         sinks[1]["change"]["after"]["writer_identity"] = (
-            "serviceAccount:service-org-987654321@"
-            "gcp-sa-logging.iam.gserviceaccount.com"
+            "serviceAccount:service-org-987654321@gcp-sa-logging.iam.gserviceaccount.com"
         )
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
@@ -5084,14 +4956,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
         sinks[1]["change"]["after"]["writer_identity"] = writer_identity
         different_organization_identity = (
-            "serviceAccount:service-org-987654321@"
-            "gcp-sa-logging.iam.gserviceaccount.com"
+            "serviceAccount:service-org-987654321@gcp-sa-logging.iam.gserviceaccount.com"
         )
         for sink in sinks[2:]:
             sink["change"]["after"]["org_id"] = "987654321"
-            sink["change"]["after"]["writer_identity"] = (
-                different_organization_identity
-            )
+            sink["change"]["after"]["writer_identity"] = different_organization_identity
         writers[1]["change"]["after"]["member"] = different_organization_identity
         result = self.check_plan(resources)
         self.assertNotEqual(result.returncode, 0)
@@ -5150,16 +5019,16 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             audit_bucket(["update"], True, True),
         )
         for resource in cases:
-            with self.subTest(actions=resource["change"]["actions"], after=resource["change"]["after"]["locked"]):
+            with self.subTest(
+                actions=resource["change"]["actions"], after=resource["change"]["after"]["locked"]
+            ):
                 document = json.loads(json.dumps(valid))
                 document["resource_changes"] = [project, resource]
                 result = self.run_plan_document("plan-resource-check", document)
                 self.assertNotEqual(result.returncode, 0)
 
         no_evidence = json.loads(json.dumps(valid))
-        no_evidence["variables"]["bootstrap"]["value"]["audit"][
-            "qualification_evidence"
-        ] = None
+        no_evidence["variables"]["bootstrap"]["value"]["audit"]["qualification_evidence"] = None
         result = self.run_plan_document("plan-resource-check", no_evidence)
         self.assertNotEqual(result.returncode, 0)
 
@@ -5210,11 +5079,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                                             "approver-two@example.com",
                                         ],
                                         "approvers": [
-                                            {
-                                                "principals": [
-                                                    "user:approver-one@example.com"
-                                                ]
-                                            }
+                                            {"principals": ["user:approver-one@example.com"]}
                                         ],
                                     },
                                     {
@@ -5224,11 +5089,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                                             "approver-two@example.com",
                                         ],
                                         "approvers": [
-                                            {
-                                                "principals": [
-                                                    "user:approver-two@example.com"
-                                                ]
-                                            }
+                                            {"principals": ["user:approver-two@example.com"]}
                                         ],
                                     },
                                 ],
@@ -5268,12 +5129,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "user:approver-two@example.com",
                     ],
                     "notification_recipients": ["security@example.com"],
-                }
+                },
             }
         )
         declarations = {
-            key: value["versions"]
-            for key, value in bootstrap["signing"]["keys"].items()
+            key: value["versions"] for key, value in bootstrap["signing"]["keys"].items()
         }
         strict_document = {
             "format_version": "1.2",
@@ -5302,31 +5162,21 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "requesters, approvers, and notification recipients must exactly "
             "equal the compiled break-glass principals"
         )
-        result = self.run_plan_document(
-            "plan-check", strict_document, "--root", "root-trust"
-        )
+        result = self.run_plan_document("plan-check", strict_document, "--root", "root-trust")
         self.assertNotIn(diagnostic, result.stderr)
-        notifications = entitlement["change"]["after"][
-            "additional_notification_targets"
-        ][0]
-        notifications["admin_email_recipients"] = [
-            "unreviewed-security@example.com"
-        ]
-        notifications["requester_email_recipients"] = [
-            "unreviewed-security@example.com"
-        ]
-        result = self.run_plan_document(
-            "plan-check", strict_document, "--root", "root-trust"
-        )
+        notifications = entitlement["change"]["after"]["additional_notification_targets"][0]
+        notifications["admin_email_recipients"] = ["unreviewed-security@example.com"]
+        notifications["requester_email_recipients"] = ["unreviewed-security@example.com"]
+        result = self.run_plan_document("plan-check", strict_document, "--root", "root-trust")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(diagnostic, result.stderr)
         notifications["admin_email_recipients"] = ["security@example.com"]
         notifications["requester_email_recipients"] = ["security@example.com"]
 
         entitlement["change"]["after"]["parent"] = "projects/arbitrary-project"
-        entitlement["change"]["after"]["privileged_access"][0]["gcp_iam_access"][0][
-            "resource"
-        ] = "//cloudresourcemanager.googleapis.com/projects/arbitrary-project"
+        entitlement["change"]["after"]["privileged_access"][0]["gcp_iam_access"][0]["resource"] = (
+            "//cloudresourcemanager.googleapis.com/projects/arbitrary-project"
+        )
         result = self.check_plan([project, entitlement])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exact planned root project", result.stderr)
@@ -5372,16 +5222,12 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ],
             },
         )
-        resource["address"] = (
-            "module.workforce_identity.google_iam_workforce_pool_provider.oidc"
-        )
+        resource["address"] = "module.workforce_identity.google_iam_workforce_pool_provider.oidc"
         result = self.check_plan([resource])
         self.assertEqual(result.returncode, 0, result.stderr)
 
         before = json.loads(json.dumps(resource["change"]["after"]))
-        before["oidc"][0]["client_secret"][0]["value"][0][
-            "plain_text_wo_version"
-        ] = 2
+        before["oidc"][0]["client_secret"][0]["value"][0]["plain_text_wo_version"] = 2
         resource["change"]["actions"] = ["update"]
         resource["change"]["before"] = before
         result = self.check_plan([resource])
@@ -5401,8 +5247,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "google.groups": "assertion.groups",
             },
             "attribute_condition": (
-                "assertion.groups.exists(group, group == "
-                "'group:administrators@example.com')"
+                "assertion.groups.exists(group, group == 'group:administrators@example.com')"
             ),
             "additional_scopes": ["groups"],
         }
@@ -5416,9 +5261,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "disabled": False,
             },
         )
-        pool["address"] = (
-            "module.workforce_identity.google_iam_workforce_pool.workforce"
-        )
+        pool["address"] = "module.workforce_identity.google_iam_workforce_pool.workforce"
         provider = self.resource(
             "google_iam_workforce_pool_provider",
             ["create"],
@@ -5457,9 +5300,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 ],
             },
         )
-        provider["address"] = (
-            "module.workforce_identity.google_iam_workforce_pool_provider.oidc"
-        )
+        provider["address"] = "module.workforce_identity.google_iam_workforce_pool_provider.oidc"
         variables = self.initial_signing_create_document()["variables"]
         bootstrap = variables["bootstrap"]["value"]
         bootstrap.update(
@@ -5471,8 +5312,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             }
         )
         declarations = {
-            key: value["versions"]
-            for key, value in bootstrap["signing"]["keys"].items()
+            key: value["versions"] for key, value in bootstrap["signing"]["keys"].items()
         }
         document = {
             "format_version": "1.2",
@@ -5497,18 +5337,14 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 }
             },
         }
-        result = self.run_plan_document(
-            "plan-check", document, "--root", "root-trust"
-        )
+        result = self.run_plan_document("plan-check", document, "--root", "root-trust")
         diagnostic = "workforce pool and provider must exactly equal the compiled"
         self.assertNotIn(diagnostic, result.stderr)
 
-        document["resource_changes"][1]["change"]["after"]["oidc"][0][
-            "issuer_uri"
-        ] = "https://unreviewed.example.com"
-        result = self.run_plan_document(
-            "plan-check", document, "--root", "root-trust"
+        document["resource_changes"][1]["change"]["after"]["oidc"][0]["issuer_uri"] = (
+            "https://unreviewed.example.com"
         )
+        result = self.run_plan_document("plan-check", document, "--root", "root-trust")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(diagnostic, result.stderr)
 
@@ -5544,9 +5380,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     "force_destroy": False,
                     "versioning": [{"enabled": True}],
                     "encryption": [{"default_kms_key_name": key}],
-                    "soft_delete_policy": [
-                        {"retention_duration_seconds": 2592000}
-                    ],
+                    "soft_delete_policy": [{"retention_duration_seconds": 2592000}],
                     "lifecycle_rule": [
                         {
                             "action": [{"type": "Delete"}],
@@ -5604,19 +5438,22 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "us-central1",
             ),
         )
-        for module, declared, primary_project, replica_project, primary_region, replica_region in contracts:
+        for (
+            module,
+            declared,
+            primary_project,
+            replica_project,
+            primary_region,
+            replica_region,
+        ) in contracts:
             primary_ring = (
-                f"projects/{primary_project}/locations/{primary_region}/"
-                "keyRings/state-backend"
+                f"projects/{primary_project}/locations/{primary_region}/keyRings/state-backend"
             )
             replica_ring = (
-                f"projects/{replica_project}/locations/{replica_region}/"
-                "keyRings/state-replica"
+                f"projects/{replica_project}/locations/{replica_region}/keyRings/state-replica"
             )
             primary_key = f"{primary_ring}/cryptoKeys/{declared['key_name']}"
-            replica_key = (
-                f"{replica_ring}/cryptoKeys/{declared['replica_key_name']}"
-            )
+            replica_key = f"{replica_ring}/cryptoKeys/{declared['replica_key_name']}"
             resources.extend(
                 [
                     crypto_key(
@@ -5657,8 +5494,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             }
         )
         signing_declarations = {
-            key: value["versions"]
-            for key, value in bootstrap["signing"]["keys"].items()
+            key: value["versions"] for key, value in bootstrap["signing"]["keys"].items()
         }
         document = {
             "format_version": "1.2",
@@ -5684,17 +5520,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             },
         }
         diagnostic = "bucket, replica, CMEKs, and prefix must exactly equal"
-        result = self.run_plan_document(
-            "plan-check", document, "--root", "root-trust"
-        )
+        result = self.run_plan_document("plan-check", document, "--root", "root-trust")
         self.assertNotIn(diagnostic, result.stderr)
 
-        document["variables"]["bootstrap"]["value"]["state_backends"][
-            "root_trust"
-        ]["key_name"] = "unreviewed-state-key"
-        result = self.run_plan_document(
-            "plan-check", document, "--root", "root-trust"
+        document["variables"]["bootstrap"]["value"]["state_backends"]["root_trust"]["key_name"] = (
+            "unreviewed-state-key"
         )
+        result = self.run_plan_document("plan-check", document, "--root", "root-trust")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(diagnostic, result.stderr)
 

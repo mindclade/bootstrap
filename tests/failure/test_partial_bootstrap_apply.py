@@ -1,14 +1,15 @@
+# pyright: basic, reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 """Failure tests for plan/evidence integrity after a partial bootstrap attempt."""
 
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 
 def runfiles_source_root():
@@ -65,9 +66,7 @@ def repository_root(bootstrapctl, destination):
         or not relative_paths
         or relative_paths != sorted(set(relative_paths))
         or any(
-            not isinstance(value, str)
-            or Path(value).is_absolute()
-            or ".." in Path(value).parts
+            not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts
             for value in relative_paths
         )
     ):
@@ -145,9 +144,7 @@ class PartialBootstrapApplyTest(unittest.TestCase):
         root_files = ["main.tf", "outputs.tf", "providers.tf", "versions.tf"]
         if not initial_local_backend:
             root_files.insert(0, "backend.tf")
-        archived_sources = {
-            f"tfconfig/m-/{name}": root_directory / name for name in root_files
-        }
+        archived_sources = {f"tfconfig/m-/{name}": root_directory / name for name in root_files}
         for key, folder in modules.items():
             for name in ("main.tf", "outputs.tf", "variables.tf"):
                 archived_sources[f"tfconfig/m-{key}/{name}"] = (
@@ -265,8 +262,7 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                         "resource_changes": [
                             {
                                 "address": (
-                                    'module.root_state.google_storage_bucket.'
-                                    'state["primary"]'
+                                    'module.root_state.google_storage_bucket.state["primary"]'
                                 ),
                                 "mode": "managed",
                                 "type": "google_storage_bucket",
@@ -302,7 +298,7 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                                     "after_unknown": {},
                                 },
                             }
-                        ]
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -534,9 +530,7 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                 approvers.append(
                     {
                         "principal": principal,
-                        "publicKeySha256": hashlib.sha256(
-                            public_der.read_bytes()
-                        ).hexdigest(),
+                        "publicKeySha256": hashlib.sha256(public_der.read_bytes()).hexdigest(),
                     }
                 )
 
@@ -553,9 +547,7 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                 "approvers": approvers,
             }
             receipt_path = directory / "receipt.json"
-            receipt_path.write_text(
-                json.dumps(receipt, separators=(",", ":")), encoding="utf-8"
-            )
+            receipt_path.write_text(json.dumps(receipt, separators=(",", ":")), encoding="utf-8")
             signature_paths = []
             for index, (private_key, _) in enumerate(keys, 1):
                 signature = directory / f"signature-{index}.bin"
@@ -604,36 +596,26 @@ class PartialBootstrapApplyTest(unittest.TestCase):
                 "--now",
                 "2026-08-30T12:15:00Z",
             ]
-            verified = subprocess.run(
-                command, text=True, capture_output=True, check=False
-            )
+            verified = subprocess.run(command, text=True, capture_output=True, check=False)
             self.assertEqual(verified.returncode, 0, verified.stderr)
 
             wrong_source = command.copy()
             source_index = wrong_source.index("--source-sha") + 1
             wrong_source[source_index] = "c" * 40
-            rejected = subprocess.run(
-                wrong_source, text=True, capture_output=True, check=False
-            )
+            rejected = subprocess.run(wrong_source, text=True, capture_output=True, check=False)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("does not match the exact requested", rejected.stderr)
 
             expired = command.copy()
             now_index = expired.index("--now") + 1
             expired[now_index] = "2026-08-30T13:00:00Z"
-            rejected = subprocess.run(
-                expired, text=True, capture_output=True, check=False
-            )
+            rejected = subprocess.run(expired, text=True, capture_output=True, check=False)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("not currently valid", rejected.stderr)
 
             receipt["approvers"][1]["principal"] = "user:platform@example.com"
-            receipt_path.write_text(
-                json.dumps(receipt, separators=(",", ":")), encoding="utf-8"
-            )
-            rejected = subprocess.run(
-                command, text=True, capture_output=True, check=False
-            )
+            receipt_path.write_text(json.dumps(receipt, separators=(",", ":")), encoding="utf-8")
+            rejected = subprocess.run(command, text=True, capture_output=True, check=False)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("distinct and sorted", rejected.stderr)
 
