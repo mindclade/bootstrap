@@ -41,9 +41,16 @@ valid_activated_nix_cache_root(root) if {
 	every public_key in root.publicKeys {
 		regex.match("^[a-z0-9][a-z0-9.-]*-v[1-9][0-9]*:[A-Za-z0-9+/]{43}=$", public_key)
 	}
+
+	# A disabled root carries null digests. regex.match raises a type error on a
+	# non-string operand rather than evaluating false, which aborts the whole
+	# deny rule instead of simply leaving this root unqualified, so the digests
+	# are type-checked before they are matched.
+	is_string(root.publicKeyDigest)
 	regex.match("^sha256:[0-9a-f]{64}$", root.publicKeyDigest)
 	count(root.accessorPrincipals) >= 1
 	root.requiredReviewerGates == ["security", "platform"]
+	is_string(root.reviewerEvidenceDigest)
 	regex.match("^[0-9a-f]{64}$", root.reviewerEvidenceDigest)
 	regex.match("[1-9a-f]", root.reviewerEvidenceDigest)
 	count(root.blockers) == 0

@@ -121,8 +121,15 @@ valid_bootstrap_visibility_transition(transition) if {
 	transition.executorRepositoryEnabled == false
 	transition.executorRepositoryId == null
 	transition.requiredReviewerGates == ["security", "platform"]
+
+	# An unqualified transition carries null digests. regex.match raises a type
+	# error on a non-string operand rather than evaluating false, which aborts
+	# the whole deny rule instead of simply leaving this transition unqualified,
+	# so the digests are type-checked before they are matched.
+	is_string(transition.visibilityEvidenceDigest)
 	regex.match("^[0-9a-f]{64}$", transition.visibilityEvidenceDigest)
 	regex.match("[1-9a-f]", transition.visibilityEvidenceDigest)
+	is_string(transition.reviewerEvidenceDigest)
 	regex.match("^[0-9a-f]{64}$", transition.reviewerEvidenceDigest)
 	regex.match("[1-9a-f]", transition.reviewerEvidenceDigest)
 	count(transition.blockers) == 0
