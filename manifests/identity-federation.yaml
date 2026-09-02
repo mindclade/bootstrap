@@ -3,6 +3,24 @@ kind: IdentityFederation
 metadata:
   name: bootstrap-identity
 spec:
+  bootstrapVisibilityTransition:
+    state: AWAITING_PRIVATE_VISIBILITY
+    activationEnabled: false
+    sourceVisibility: public
+    finalVisibility: private
+    repositoryFullName: mindclade/bootstrap
+    repositoryOwnerId: "316676129"
+    repositoryId: "1350991612"
+    executorRepositoryEnabled: false
+    executorRepositoryId: null
+    requiredReviewerGates:
+      - security
+      - platform
+    visibilityEvidenceDigest: null
+    reviewerEvidenceDigest: null
+    blockers:
+      - private-visibility-not-evidenced
+      - independent-review-not-evidenced
   workforce:
     projectRef: identity-root
     location: global

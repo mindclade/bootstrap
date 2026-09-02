@@ -50,6 +50,11 @@ output "signing_roots" {
   value       = module.signing_root.keys
 }
 
+output "nix_cache_signing_root" {
+  description = "Non-secret Nix cache signing public-key, digest, state, and Secret Manager resource metadata."
+  value       = module.signing_root.nix_cache_signing_root
+}
+
 output "signing_version_declarations" {
   description = "State-backed append-only ledger of immutable signing-version activation windows."
   value = {

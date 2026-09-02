@@ -15,6 +15,52 @@ deny contains violation if {
 	}
 }
 
+valid_disabled_nix_cache_root(root) if {
+	root.state == "DISABLED"
+	root.activationEnabled == false
+	root.secretId == "nix-cache-signing-key"
+	root.algorithm == "ED25519"
+	root.secretStorage == "SECRET_MANAGER_WRITE_ONLY"
+	root.secretVersionWriteOnly == null
+	count(root.publicKeys) == 0
+	root.publicKeyDigest == null
+	count(root.accessorPrincipals) == 0
+	root.requiredReviewerGates == ["security", "platform"]
+	root.reviewerEvidenceDigest == null
+	count(root.blockers) > 0
+}
+
+valid_activated_nix_cache_root(root) if {
+	root.state == "ACTIVATED"
+	root.activationEnabled == true
+	root.secretId == "nix-cache-signing-key"
+	root.algorithm == "ED25519"
+	root.secretStorage == "SECRET_MANAGER_WRITE_ONLY"
+	root.secretVersionWriteOnly >= 1
+	count(root.publicKeys) >= 1
+	every public_key in root.publicKeys {
+		regex.match("^[a-z0-9][a-z0-9.-]*-v[1-9][0-9]*:[A-Za-z0-9+/]{43}=$", public_key)
+	}
+	regex.match("^sha256:[0-9a-f]{64}$", root.publicKeyDigest)
+	count(root.accessorPrincipals) >= 1
+	root.requiredReviewerGates == ["security", "platform"]
+	regex.match("^[0-9a-f]{64}$", root.reviewerEvidenceDigest)
+	regex.match("[1-9a-f]", root.reviewerEvidenceDigest)
+	count(root.blockers) == 0
+}
+
+deny contains violation if {
+	input.kind == "SigningRootSet"
+	root := object.get(input.spec, "nixCacheSigningRoot", {})
+	not valid_disabled_nix_cache_root(root)
+	not valid_activated_nix_cache_root(root)
+	violation := {
+		"code": "NIX_CACHE_SIGNING_ROOT_NOT_QUALIFIED",
+		"message": "Nix cache signing requires committed public keys, a write-only Secret Manager version, explicit accessors, and independent reviewer evidence",
+		"resource": "nixCacheSigningRoot",
+	}
+}
+
 deny contains violation if {
 	input.kind == "SigningRootSet"
 	some key_id, key in input.spec.keys

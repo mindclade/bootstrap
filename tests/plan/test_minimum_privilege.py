@@ -16,6 +16,16 @@ mRlf0R6uyEmYOcJ9OUMWh7B4DftTdqcSXXK0cFf0RwQvPW9WBhTWPqEAWQ==
 -----END PUBLIC KEY-----
 """
 
+SIGNING_KEY_NAMES = (
+    "audit-anchor",
+    "bootstrap-handoff",
+    "connected-observation-evidence",
+    "github-config-plan-evidence",
+    "infrastructure-export",
+    "recovery-evidence",
+    "supply-chain-provenance",
+)
+
 
 def runfiles_directory():
     runfiles = os.environ.get("RUNFILES_DIR") or os.environ.get("TEST_SRCDIR")
@@ -280,14 +290,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                 "projects/bootstrap-signing/locations/us-central1/keyRings/"
                 f"bootstrap-signing/cryptoKeys/{key}/cryptoKeyVersions/1"
             )
-            for key in (
-                "audit-anchor",
-                "bootstrap-handoff",
-                "connected-observation-evidence",
-                "github-config-plan-evidence",
-                "infrastructure-export",
-                "recovery-evidence",
-            )
+            for key in SIGNING_KEY_NAMES
         }
 
         signing_windows = {
@@ -1077,14 +1080,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             "github-config-plan-evidence": "serviceAccount:github-config-plan@example.iam.gserviceaccount.com",
             "recovery-evidence": "serviceAccount:recovery-signer@example.iam.gserviceaccount.com",
         }
-        for key_name in (
-            "audit-anchor",
-            "bootstrap-handoff",
-            "connected-observation-evidence",
-            "github-config-plan-evidence",
-            "infrastructure-export",
-            "recovery-evidence",
-        ):
+        for key_name in SIGNING_KEY_NAMES:
             version = self.resource(
                 "google_kms_crypto_key_version",
                 ["create"],
@@ -1112,6 +1108,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             if key_name in {
                 "connected-observation-evidence",
                 "infrastructure-export",
+                "supply-chain-provenance",
             }:
                 continue
 
@@ -1253,14 +1250,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     }
                 },
             }
-            for key_name in (
-                "audit-anchor",
-                "bootstrap-handoff",
-                "connected-observation-evidence",
-                "github-config-plan-evidence",
-                "infrastructure-export",
-                "recovery-evidence",
-            )
+            for key_name in SIGNING_KEY_NAMES
         }
         return {
             "format_version": "1.2",
@@ -1291,14 +1281,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                                 "rotation_days": 90,
                                 "versions": json.loads(json.dumps(versions)),
                             }
-                            for key in (
-                                "audit-anchor",
-                                "bootstrap-handoff",
-                                "connected-observation-evidence",
-                                "github-config-plan-evidence",
-                                "infrastructure-export",
-                                "recovery-evidence",
-                            )
+                            for key in SIGNING_KEY_NAMES
                         }
                     }
                 }
@@ -1372,7 +1355,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                         "assertion.repository_owner == 'mindclade'",
                         "assertion.repository_id == '1350991612'",
                         "assertion.repository_owner_id == '316676129'",
-                        "assertion.repository_visibility == 'public'",
+                        "assertion.repository_visibility == 'private'",
                         "assertion.ref == 'refs/heads/main'",
                         "assertion.workflow_ref == 'mindclade/bootstrap/.github/workflows/protected-apply.yml@refs/heads/main'",
                         "assertion.workflow_sha == assertion.sha",
@@ -1881,7 +1864,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
             ]
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("outside the Ring-0 allowlist", result.stderr)
+        self.assertIn("outside the exact Ring-0 resource-address allowlist", result.stderr)
         self.assertIn("static credential field", result.stderr)
 
     def test_insecure_state_bucket_is_rejected(self):
@@ -3346,16 +3329,13 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_versions_and_time_scoped_signers_are_exact(self):
         resources = []
-        for key in (
-            "audit-anchor",
-            "bootstrap-handoff",
-            "connected-observation-evidence",
-            "github-config-plan-evidence",
-            "infrastructure-export",
-            "recovery-evidence",
-        ):
+        for key in SIGNING_KEY_NAMES:
             resources.extend([self.signing_crypto_key(key), self.signing_version(key)])
-            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+            if key not in {
+                "connected-observation-evidence",
+                "infrastructure-export",
+                "supply-chain-provenance",
+            }:
                 resources.append(self.signing_binding(key))
         result = self.check_plan(resources)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -3644,21 +3624,18 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_allows_prestage_then_concrete_activation(self):
         prestage_resources = []
-        for key in (
-            "audit-anchor",
-            "bootstrap-handoff",
-            "connected-observation-evidence",
-            "github-config-plan-evidence",
-            "infrastructure-export",
-            "recovery-evidence",
-        ):
+        for key in SIGNING_KEY_NAMES:
             prestage_resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"]),
                     self.unknown_signing_version(key),
                 ]
             )
-            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+            if key not in {
+                "connected-observation-evidence",
+                "infrastructure-export",
+                "supply-chain-provenance",
+            }:
                 prestage_resources.append(self.signing_binding(key, actions=["no-op"]))
         prestage = {
             "format_version": "1.2",
@@ -3670,14 +3647,7 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         activation_resources = []
-        for key in (
-            "audit-anchor",
-            "bootstrap-handoff",
-            "connected-observation-evidence",
-            "github-config-plan-evidence",
-            "infrastructure-export",
-            "recovery-evidence",
-        ):
+        for key in SIGNING_KEY_NAMES:
             activation_resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"], state="DISABLED"),
@@ -3689,7 +3659,11 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
                     ),
                 ]
             )
-            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+            if key not in {
+                "connected-observation-evidence",
+                "infrastructure-export",
+                "supply-chain-provenance",
+            }:
                 activation_resources.append(
                     self.signing_binding(
                         key,
@@ -3711,21 +3685,18 @@ class MinimumPrivilegePlanTest(unittest.TestCase):
 
     def test_signing_rotation_rejects_undeclared_gap_and_window_mutation(self):
         resources = []
-        for key in (
-            "audit-anchor",
-            "bootstrap-handoff",
-            "connected-observation-evidence",
-            "github-config-plan-evidence",
-            "infrastructure-export",
-            "recovery-evidence",
-        ):
+        for key in SIGNING_KEY_NAMES:
             resources.extend(
                 [
                     self.signing_version(key, actions=["no-op"]),
                     self.unknown_signing_version(key),
                 ]
             )
-            if key not in {"connected-observation-evidence", "infrastructure-export"}:
+            if key not in {
+                "connected-observation-evidence",
+                "infrastructure-export",
+                "supply-chain-provenance",
+            }:
                 resources.append(self.signing_binding(key, actions=["no-op"]))
         base = {
             "format_version": "1.2",

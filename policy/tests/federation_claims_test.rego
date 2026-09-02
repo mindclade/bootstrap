@@ -80,9 +80,26 @@ valid_infrastructure := {
 	},
 }
 
+valid_visibility_transition := {
+	"state": "AWAITING_PRIVATE_VISIBILITY",
+	"activationEnabled": false,
+	"sourceVisibility": "public",
+	"finalVisibility": "private",
+	"repositoryFullName": "mindclade/bootstrap",
+	"repositoryOwnerId": "316676129",
+	"repositoryId": "1350991612",
+	"executorRepositoryEnabled": false,
+	"executorRepositoryId": null,
+	"requiredReviewerGates": ["security", "platform"],
+	"visibilityEvidenceDigest": null,
+	"reviewerEvidenceDigest": null,
+	"blockers": ["private-visibility-not-evidenced", "independent-review-not-evidenced"],
+}
+
 valid_input := {
 	"kind": "IdentityFederation",
 	"spec": {
+		"bootstrapVisibilityTransition": valid_visibility_transition,
 		"activation": {"state": "FOUNDER_BOOTSTRAPPED"},
 		"workloadIdentityProviders": {
 			"github": valid_provider("github", {
@@ -107,6 +124,41 @@ valid_input := {
 			}),
 		},
 	},
+}
+
+test_missing_bootstrap_visibility_transition_is_denied if {
+	candidate := {"kind": valid_input.kind, "spec": object.remove(valid_input.spec, ["bootstrapVisibilityTransition"])}
+	violations := deny with input as candidate
+	some violation in violations
+	violation.code == "BOOTSTRAP_VISIBILITY_TRANSITION_INVALID"
+}
+
+test_private_transition_requires_independent_evidence if {
+	qualified := object.union(valid_visibility_transition, {
+		"state": "PRIVATE_QUALIFIED",
+		"activationEnabled": true,
+		"visibilityEvidenceDigest": sprintf("%064d", [1]),
+		"reviewerEvidenceDigest": null,
+		"blockers": [],
+	})
+	candidate := object.union(valid_input, {"spec": object.union(valid_input.spec, {"bootstrapVisibilityTransition": qualified})})
+	violations := deny with input as candidate
+	some violation in violations
+	violation.code == "BOOTSTRAP_VISIBILITY_TRANSITION_INVALID"
+}
+
+test_private_transition_rejects_all_zero_evidence if {
+	qualified := object.union(valid_visibility_transition, {
+		"state": "PRIVATE_QUALIFIED",
+		"activationEnabled": true,
+		"visibilityEvidenceDigest": sprintf("%064d", [0]),
+		"reviewerEvidenceDigest": sprintf("%064d", [0]),
+		"blockers": [],
+	})
+	candidate := object.union(valid_input, {"spec": object.union(valid_input.spec, {"bootstrapVisibilityTransition": qualified})})
+	violations := deny with input as candidate
+	some violation in violations
+	violation.code == "BOOTSTRAP_VISIBILITY_TRANSITION_INVALID"
 }
 
 test_exact_claims_are_allowed if {

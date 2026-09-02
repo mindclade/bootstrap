@@ -4,6 +4,7 @@ package plan
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -72,6 +73,9 @@ var approvedResourceTypes = map[string]bool{
 	"google_project_iam_custom_role":                  true,
 	"google_project_iam_member":                       true,
 	"google_project_service":                          true,
+	"google_secret_manager_secret":                    true,
+	"google_secret_manager_secret_iam_member":         true,
+	"google_secret_manager_secret_version":            true,
 	"google_service_account":                          true,
 	"google_service_account_iam_member":               true,
 	"google_storage_bucket":                           true,
@@ -149,16 +153,19 @@ var approvedResourceAddressFamilies = map[string]bool{
 	"managed|google_project_service|module.break_glass.google_project_service.pam":                                                     true,
 	"managed|google_privileged_access_manager_entitlement|module.break_glass.google_privileged_access_manager_entitlement.break_glass": true,
 
-	"managed|google_project|module.signing_root.google_project.signing":                                               true,
-	"managed|google_project_service|module.signing_root.google_project_service.required":                              true,
-	"managed|google_project_iam_custom_role|module.signing_root.google_project_iam_custom_role.recovery_metadata":     true,
-	"managed|google_kms_key_ring|module.signing_root.google_kms_key_ring.signing":                                     true,
-	"managed|google_kms_crypto_key|module.signing_root.google_kms_crypto_key.signing":                                 true,
-	"managed|google_kms_crypto_key_version|module.signing_root.google_kms_crypto_key_version.signing":                 true,
-	"data|google_kms_crypto_key_version|module.signing_root.data.google_kms_crypto_key_version.active":                true,
-	"managed|google_kms_key_ring_iam_member|module.signing_root.google_kms_key_ring_iam_member.administrator":         true,
-	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.signer":            true,
-	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.recovery_metadata": true,
+	"managed|google_project|module.signing_root.google_project.signing":                                                              true,
+	"managed|google_project_service|module.signing_root.google_project_service.required":                                             true,
+	"managed|google_project_iam_custom_role|module.signing_root.google_project_iam_custom_role.recovery_metadata":                    true,
+	"managed|google_kms_key_ring|module.signing_root.google_kms_key_ring.signing":                                                    true,
+	"managed|google_kms_crypto_key|module.signing_root.google_kms_crypto_key.signing":                                                true,
+	"managed|google_kms_crypto_key_version|module.signing_root.google_kms_crypto_key_version.signing":                                true,
+	"data|google_kms_crypto_key_version|module.signing_root.data.google_kms_crypto_key_version.active":                               true,
+	"managed|google_kms_key_ring_iam_member|module.signing_root.google_kms_key_ring_iam_member.administrator":                        true,
+	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.signer":                           true,
+	"managed|google_kms_crypto_key_iam_member|module.signing_root.google_kms_crypto_key_iam_member.recovery_metadata":                true,
+	"managed|google_secret_manager_secret|module.signing_root.google_secret_manager_secret.nix_cache_signing":                        true,
+	"managed|google_secret_manager_secret_iam_member|module.signing_root.google_secret_manager_secret_iam_member.nix_cache_accessor": true,
+	"managed|google_secret_manager_secret_version|module.signing_root.google_secret_manager_secret_version.nix_cache_signing":        true,
 
 	"managed|google_project_iam_custom_role|module.recovery_exports.google_project_iam_custom_role.plan_read":                                        true,
 	"managed|google_project_iam_custom_role|module.recovery_exports.google_project_iam_custom_role.plan_object_read":                                 true,
@@ -231,9 +238,10 @@ var exactResourceAddressKeys = map[string]map[string]bool{
 	"module.audit_root.google_project_iam_member.sink_writer":                                    stringSet("primary", "recovery"),
 	"module.audit_root.google_project_iam_custom_role.plan_read":                                 stringSet("primary", "recovery"),
 	"module.audit_root.google_project_iam_member.plan_read":                                      stringSet("primary", "recovery"),
-	"module.signing_root.google_project_service.required":                                        stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "serviceusage.googleapis.com"),
-	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
-	"module.signing_root.data.google_kms_crypto_key_version.active":                              stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"),
+	"module.signing_root.google_project_service.required":                                        stringSet("cloudkms.googleapis.com", "cloudresourcemanager.googleapis.com", "iam.googleapis.com", "secretmanager.googleapis.com", "serviceusage.googleapis.com"),
+	"module.signing_root.google_kms_crypto_key.signing":                                          stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence", "supply-chain-provenance"),
+	"module.signing_root.data.google_kms_crypto_key_version.active":                              stringSet("audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence", "supply-chain-provenance"),
+	"module.signing_root.google_secret_manager_secret_version.nix_cache_signing":                 stringSet("active"),
 	"module.recovery_exports.google_kms_crypto_key.recovery":                                     stringSet("exports", "evidence"),
 	"module.recovery_exports.google_kms_crypto_key_iam_member.storage":                           stringSet("exports", "evidence"),
 	"module.recovery_exports.google_storage_bucket.recovery":                                     stringSet("exports", "evidence"),
@@ -262,11 +270,12 @@ var exactResourceAddressKeys = map[string]map[string]bool{
 }
 
 var dynamicResourceAddressKeys = map[string]string{
-	"module.audit_root.google_project_iam_member.reader":               "audit-bucket-principal",
-	"module.audit_root.google_project_iam_member.administrator":        "role-principal",
-	"module.signing_root.google_kms_key_ring_iam_member.administrator": "principal",
-	"module.signing_root.google_kms_crypto_key_iam_member.signer":      "signing-key-principal",
-	"module.break_glass.google_project_service.pam":                    "project",
+	"module.audit_root.google_project_iam_member.reader":                             "audit-bucket-principal",
+	"module.audit_root.google_project_iam_member.administrator":                      "role-principal",
+	"module.signing_root.google_kms_key_ring_iam_member.administrator":               "principal",
+	"module.signing_root.google_kms_crypto_key_iam_member.signer":                    "signing-key-principal",
+	"module.signing_root.google_secret_manager_secret_iam_member.nix_cache_accessor": "principal",
+	"module.break_glass.google_project_service.pam":                                  "project",
 }
 
 func stringSet(values ...string) map[string]bool {
@@ -410,6 +419,7 @@ var approvedRoles = map[string]bool{
 	"roles/privilegedaccessmanager.admin":        true,
 	"roles/privilegedaccessmanager.viewer":       true,
 	"roles/resourcemanager.projectIamAdmin":      true,
+	"roles/secretmanager.secretAccessor":         true,
 	"roles/serviceusage.serviceUsageAdmin":       true,
 	"roles/serviceusage.serviceUsageViewer":      true,
 	"roles/storage.admin":                        true,
@@ -571,7 +581,7 @@ var recoveryStateExportRoleContracts = map[string]replicationRoleContract{
 
 var recoveryStateExportKeys = []string{"root-trust", "recovery-plane"}
 
-var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence"}
+var signingKeyNames = []string{"audit-anchor", "bootstrap-handoff", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "recovery-evidence", "supply-chain-provenance"}
 
 var recoverySigningWindowNames = []string{"audit-anchor", "bootstrap-handoff", "recovery-evidence"}
 
@@ -756,14 +766,22 @@ func AnalyzeForRoot(data []byte, root string) (Summary, error) {
 		}
 	}
 	ciEvidenceEnabled := false
+	nixCacheActivated := false
+	nixCacheAccessorCount := 0
 	if bootstrapVariable, ok := parsed.Variables["bootstrap"]; ok {
 		if bootstrap, ok := bootstrapVariable.Value.(map[string]any); ok {
 			if ciEvidence, ok := bootstrap["github_ci_evidence"].(map[string]any); ok {
 				ciEvidenceEnabled, _ = ciEvidence["activation_enabled"].(bool)
 			}
+			if signing, ok := bootstrap["signing"].(map[string]any); ok {
+				if nixCache, ok := signing["nix_cache"].(map[string]any); ok {
+					nixCacheActivated, _ = nixCache["activation_enabled"].(bool)
+					nixCacheAccessorCount = len(stringSetFromValue(nixCache["accessor_principals"]))
+				}
+			}
 		}
 	}
-	validateCompositionCompleteness(parsed.ResourceChanges, root, contract, ciEvidenceEnabled, &result.Violations)
+	validateCompositionCompleteness(parsed.ResourceChanges, root, contract, ciEvidenceEnabled, nixCacheActivated, nixCacheAccessorCount, &result.Violations)
 	if root == "root-trust" && present && contractError == nil {
 		validateSigningDeclarationOutput(parsed.OutputChanges, contract, &result.Violations)
 		validateRootTrustVariableGraph(parsed, contract, &result.Violations)
@@ -1704,7 +1722,7 @@ var rootTrustDynamicFamilyCounts = map[string]int{
 	"module.break_glass.google_project_service.pam":                    4,
 }
 
-func validateCompositionCompleteness(resources []resourceChange, root string, signing *signingContract, ciEvidenceEnabled bool, violations *[]string) {
+func validateCompositionCompleteness(resources []resourceChange, root string, signing *signingContract, ciEvidenceEnabled, nixCacheActivated bool, nixCacheAccessorCount int, violations *[]string) {
 	wantRecovery := root == "recovery-plane"
 	if len(resources) == 0 {
 		*violations = append(*violations, fmt.Sprintf("--root %s plan must contain the configured Ring-0 resources, including no-op instances", root))
@@ -1739,6 +1757,26 @@ func validateCompositionCompleteness(resources []resourceChange, root string, si
 		if !ciEvidenceEnabled && (base == "module.github_federation.google_iam_workload_identity_pool.ci_evidence" ||
 			base == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence" ||
 			base == "module.github_federation.google_service_account_iam_member.ci_evidence") {
+			continue
+		}
+		if base == "module.signing_root.google_secret_manager_secret_version.nix_cache_signing" {
+			expected := 0
+			if nixCacheActivated {
+				expected = 1
+			}
+			if len(seenFamilies[base]) != expected {
+				*violations = append(*violations, fmt.Sprintf("--root %s plan must contain exactly %d activation-qualified Nix cache signing secret versions", root, expected))
+			}
+			continue
+		}
+		if base == "module.signing_root.google_secret_manager_secret_iam_member.nix_cache_accessor" {
+			expected := 0
+			if nixCacheActivated {
+				expected = nixCacheAccessorCount
+			}
+			if len(seenFamilies[base]) != expected {
+				*violations = append(*violations, fmt.Sprintf("--root %s plan must contain exactly %d activation-qualified Nix cache signing accessors", root, expected))
+			}
 			continue
 		}
 		if base == "module.github_federation.google_iam_workload_identity_pool.github_config" ||
@@ -2107,6 +2145,7 @@ func validateCompiledAuditGraph(resources []resourceChange, bootstrap map[string
 
 func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[string]any, projects map[string]string, violations *[]string) bootstrapPrincipals {
 	github, _ := bootstrap["github"].(map[string]any)
+	privateQualified := validateBootstrapVisibilityTransition(github, violations)
 	serviceAccountIDs, _ := github["service_account_ids"].(map[string]any)
 	principals := bootstrapPrincipals{
 		plan:     serviceAccountPrincipal(stringValue(serviceAccountIDs["plan"]), projects["root_state"]),
@@ -2135,7 +2174,7 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		poolID := stringValue(poolIDs[instance])
 		providerID := stringValue(providerIDs[instance])
 		accountID := stringValue(serviceAccountIDs[instance])
-		if pool == nil || pool["project"] != poolProject || pool["workload_identity_pool_id"] != poolID {
+		if pool == nil || pool["project"] != poolProject || pool["workload_identity_pool_id"] != poolID || pool["disabled"] != !privateQualified {
 			*violations = append(*violations, poolAddress+" must exactly equal its compiled separated pool project and pool ID")
 		}
 		if service == nil || service["project"] != serviceProject || service["account_id"] != accountID {
@@ -2143,7 +2182,7 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		}
 		environment := map[string]string{"plan": "trusted-build", "apply": "infrastructure-apply", "recovery": "infrastructure-apply"}[instance]
 		validateCompiledBootstrapProvider(providerAddress, provider, github, poolProject, poolID, providerID,
-			stringValue(audiences[instance]), environment, stringValue(workflowRefs[instance]), instance, violations)
+			stringValue(audiences[instance]), environment, stringValue(workflowRefs[instance]), instance, privateQualified, violations)
 		validateCompiledFederationBinding(bindingAddress, binding, pool, accountID, serviceProject, "repository_id", stringValue(github["repository_id"]), violations)
 	}
 	validateCompiledFederationActivation(bootstrap, violations)
@@ -2163,6 +2202,37 @@ func validateCompiledFederationGraph(resources []resourceChange, bootstrap map[s
 		"sub": stringValue(gitops["subject"]), "repository": stringValue(gitops["repository"]), "ref": stringValue(gitops["ref"]),
 	}, "repository", stringValue(gitops["repository"]), violations)
 	return principals
+}
+
+func validateBootstrapVisibilityTransition(github map[string]any, violations *[]string) bool {
+	transition, ok := github["visibility_transition"].(map[string]any)
+	state := stringValue(transition["state"])
+	activationEnabled, activationOK := transition["activation_enabled"].(bool)
+	digestPattern := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	valid := ok && activationOK && transition["source_visibility"] == "public" && transition["final_visibility"] == "private" &&
+		transition["executor_repository_enabled"] == false && plannedUnset(transition["executor_repository_id"]) &&
+		exactStringSet(transition["required_reviewer_gates"], []string{"security", "platform"})
+	qualified := false
+	switch state {
+	case "AWAITING_PRIVATE_VISIBILITY":
+		valid = valid && !activationEnabled && plannedUnset(transition["visibility_evidence_digest"]) &&
+			plannedUnset(transition["reviewer_evidence_digest"]) &&
+			exactStringSet(transition["blockers"], []string{"private-visibility-not-evidenced", "independent-review-not-evidenced"})
+	case "PRIVATE_QUALIFIED":
+		qualified = true
+		visibilityDigest := stringValue(transition["visibility_evidence_digest"])
+		reviewerDigest := stringValue(transition["reviewer_evidence_digest"])
+		valid = valid && activationEnabled && digestPattern.MatchString(visibilityDigest) &&
+			visibilityDigest != strings.Repeat("0", 64) && digestPattern.MatchString(reviewerDigest) &&
+			reviewerDigest != strings.Repeat("0", 64) && exactStringSet(transition["blockers"], []string{})
+	default:
+		valid = false
+	}
+	if !valid {
+		*violations = append(*violations, "compiled bootstrap visibility transition must remain exact-repository, no-executor, private-only, and independently reviewed")
+		return false
+	}
+	return qualified
 }
 
 func validateCompiledFederationActivation(bootstrap map[string]any, violations *[]string) {
@@ -2304,7 +2374,7 @@ func validateCompiledGithubConfigGraph(resources []resourceChange, bootstrap map
 	}
 }
 
-func validateCompiledBootstrapProvider(address string, provider, github map[string]any, project, poolID, providerID, audience, environment, workflowRef, instance string, violations *[]string) {
+func validateCompiledBootstrapProvider(address string, provider, github map[string]any, project, poolID, providerID, audience, environment, workflowRef, instance string, privateQualified bool, violations *[]string) {
 	expectedMapping := map[string]string{
 		"google.subject":                  githubRepositorySubjectMapping("bootstrap-" + instance),
 		"attribute.repository_id":         "assertion.repository_id",
@@ -2320,6 +2390,7 @@ func validateCompiledBootstrapProvider(address string, provider, github map[stri
 	oidc, _ := singleObject(provider["oidc"])
 	if provider == nil || provider["project"] != project || provider["workload_identity_pool_id"] != poolID ||
 		provider["workload_identity_pool_provider_id"] != providerID || !exactStringMap(provider["attribute_mapping"], expectedMapping) ||
+		provider["disabled"] != !privateQualified ||
 		provider["attribute_condition"] != bootstrapProviderCondition(github, environment, workflowRef) ||
 		oidc["issuer_uri"] != github["issuer_uri"] || !exactStringSet(oidc["allowed_audiences"], []string{audience}) {
 		*violations = append(*violations, address+" must exactly bind its immutable custom repository subject, source SHA, workflow, protected environment, runner class, and approved audience")
@@ -2339,7 +2410,7 @@ func bootstrapProviderCondition(github map[string]any, environment, workflowRef 
 		"assertion.repository_owner == 'mindclade'",
 		fmt.Sprintf("assertion.repository_id == '%s'", stringValue(github["repository_id"])),
 		fmt.Sprintf("assertion.repository_owner_id == '%s'", stringValue(github["repository_owner_id"])),
-		"assertion.repository_visibility == 'public'",
+		"assertion.repository_visibility == 'private'",
 		fmt.Sprintf("assertion.ref == '%s'", stringValue(github["branch_ref"])),
 		fmt.Sprintf("assertion.workflow_ref == '%s'", workflowRef),
 		"assertion.workflow_sha == assertion.sha",
@@ -2681,6 +2752,7 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 	}
 
 	signingObject, _ := bootstrap["signing"].(map[string]any)
+	validateCompiledNixCacheSigningGraph(resources, bootstrap, signingObject, violations)
 	expectedSigningAdmins := stringSetFromValue(signingObject["administrators"])
 	actualSigningAdmins := map[string]bool{}
 	actualSigners := map[string]map[string]bool{}
@@ -2714,7 +2786,7 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 			expected[principals.buildkite] = true
 		case "recovery-evidence":
 			expected[principals.recovery] = true
-		case "connected-observation-evidence", "infrastructure-export":
+		case "connected-observation-evidence", "infrastructure-export", "supply-chain-provenance":
 			// The source declares its future signers, while this key stays
 			// IAM-disabled until connected infrastructure qualification.
 			expected = map[string]bool{}
@@ -2726,6 +2798,106 @@ func validateCompiledPrincipalGraph(resources []resourceChange, bootstrap map[st
 	_ = signing // The parsed signing contract independently validates version declarations.
 
 	validateCompiledPAMPrincipals(resources, bootstrap, violations)
+}
+
+func validateCompiledNixCacheSigningGraph(resources []resourceChange, bootstrap, signing map[string]any, violations *[]string) {
+	nixCache, ok := signing["nix_cache"].(map[string]any)
+	projects, projectsOK := bootstrap["projects"].(map[string]any)
+	signingProject, signingProjectOK := projects["signing"].(map[string]any)
+	projectID := stringValue(signingProject["id"])
+	activated, activationOK := nixCache["activation_enabled"].(bool)
+	if !ok || !projectsOK || !signingProjectOK || !activationOK || projectID == "" {
+		*violations = append(*violations, "compiled Nix cache signing root must bind one explicit signing project and activation state")
+		return
+	}
+	validContract := nixCache["secret_id"] == "nix-cache-signing-key" && nixCache["algorithm"] == "ED25519" &&
+		nixCache["secret_storage"] == "SECRET_MANAGER_WRITE_ONLY" &&
+		exactStringSet(nixCache["required_reviewer_gates"], []string{"security", "platform"})
+	switch stringValue(nixCache["state"]) {
+	case "DISABLED":
+		validContract = validContract && !activated && plannedUnset(nixCache["secret_version_write_only"]) &&
+			exactStringSet(nixCache["public_keys"], []string{}) && plannedUnset(nixCache["public_key_digest"]) &&
+			exactStringSet(nixCache["accessor_principals"], []string{}) && plannedUnset(nixCache["reviewer_evidence_digest"]) &&
+			exactStringSet(nixCache["blockers"], []string{"cache-public-key-not-committed", "secret-version-not-created", "independent-review-not-evidenced"})
+	case "ACTIVATED":
+		version, versionOK := nixCache["secret_version_write_only"].(float64)
+		publicKeys, publicKeysOK := nixCache["public_keys"].([]any)
+		canonicalPublicKeys := make([]string, 0, len(publicKeys))
+		publicKeyPattern := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*-v[1-9][0-9]*:[A-Za-z0-9+/]{43}=$`)
+		for _, value := range publicKeys {
+			publicKey, publicKeyOK := value.(string)
+			if !publicKeyOK || !publicKeyPattern.MatchString(publicKey) {
+				publicKeysOK = false
+				continue
+			}
+			canonicalPublicKeys = append(canonicalPublicKeys, publicKey)
+		}
+		encodedPublicKeys, _ := json.Marshal(canonicalPublicKeys)
+		expectedDigest := fmt.Sprintf("sha256:%x", sha256.Sum256(encodedPublicKeys))
+		accessors := stringSetFromValue(nixCache["accessor_principals"])
+		validAccessors := len(accessors) > 0
+		for accessor := range accessors {
+			validAccessors = validAccessors && serviceAccountIAMPattern.MatchString(accessor)
+		}
+		reviewerDigest := stringValue(nixCache["reviewer_evidence_digest"])
+		validContract = validContract && activated && versionOK && version >= 1 && math.Trunc(version) == version &&
+			publicKeysOK && len(canonicalPublicKeys) > 0 && nixCache["public_key_digest"] == expectedDigest && validAccessors &&
+			regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(reviewerDigest) && reviewerDigest != strings.Repeat("0", 64) &&
+			exactStringSet(nixCache["blockers"], []string{})
+	default:
+		validContract = false
+	}
+	if !validContract {
+		*violations = append(*violations, "compiled Nix cache signing root must preserve its exact fail-closed or reviewer-qualified write-only contract")
+	}
+
+	const secretAddress = "module.signing_root.google_secret_manager_secret.nix_cache_signing"
+	secret := resourceAfter(resources, secretAddress)
+	replication := firstObject(secret["replication"])
+	userManaged := firstObject(replication["user_managed"])
+	replicas, replicasOK := userManaged["replicas"].([]any)
+	replica := map[string]any{}
+	if replicasOK && len(replicas) == 1 {
+		replica, _ = replicas[0].(map[string]any)
+	}
+	if secret == nil || secret["project"] != projectID || secret["secret_id"] != nixCache["secret_id"] ||
+		secret["deletion_protection"] != true || !replicasOK || len(replicas) != 1 || replica["location"] != signing["location"] {
+		*violations = append(*violations, secretAddress+" must preserve the deletion-protected, region-bound Nix signing secret container in the compiled signing project")
+	}
+
+	versionAddress := indexedResourceAddress("module.signing_root.google_secret_manager_secret_version.nix_cache_signing", "active")
+	version := resourceAfter(resources, versionAddress)
+	if activated {
+		if version == nil || version["deletion_policy"] != "DISABLE" || version["secret_data_wo_version"] != nixCache["secret_version_write_only"] ||
+			!plannedUnset(version["secret_data"]) || !plannedUnset(version["secret_data_wo"]) {
+			*violations = append(*violations, versionAddress+" must use only the compiled write-only version and retain disabled versions without exposing secret bytes")
+		}
+	} else if version != nil {
+		*violations = append(*violations, versionAddress+" must be absent while Nix cache signing activation is disabled")
+	}
+
+	expectedAccessors := stringSetFromValue(nixCache["accessor_principals"])
+	actualAccessors := map[string]bool{}
+	for _, resource := range resources {
+		const base = "module.signing_root.google_secret_manager_secret_iam_member.nix_cache_accessor"
+		if resourceAddressBase(resource.Address) != base {
+			continue
+		}
+		principal, indexed, valid := terraformAddressStringIndex(resource.Address, base)
+		after, _ := resource.Change.After.(map[string]any)
+		if !indexed || !valid || after["member"] != principal || after["project"] != projectID ||
+			after["secret_id"] != nixCache["secret_id"] || after["role"] != "roles/secretmanager.secretAccessor" {
+			*violations = append(*violations, resource.Address+" must bind only its compiled Nix cache signer to the exact signing secret")
+			continue
+		}
+		actualAccessors[principal] = true
+	}
+	if !activated {
+		expectedAccessors = map[string]bool{}
+	}
+	if !sameStringSet(actualAccessors, expectedAccessors) {
+		*violations = append(*violations, "Nix cache signing accessors must exactly equal the activation-qualified compiled service accounts")
+	}
 }
 
 func stringSetFromValue(value any) map[string]bool {
@@ -3369,7 +3541,13 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 			validateActiveSigningVersionData(resource, after, violations)
 		}
 	case "google_iam_workload_identity_pool_provider", "google_iam_workforce_pool_provider":
-		requireEqual(after, "disabled", false, resource.Address, violations)
+		if resourceAddressBase(resource.Address) == "module.github_federation.google_iam_workload_identity_pool_provider.github" {
+			if _, ok := after["disabled"].(bool); !ok {
+				*violations = append(*violations, resource.Address+" must set disabled to one explicit transition-derived boolean")
+			}
+		} else {
+			requireEqual(after, "disabled", false, resource.Address, violations)
+		}
 		condition, _ := after["attribute_condition"].(string)
 		ciEvidenceProvider := resourceAddressBase(resource.Address) == "module.github_federation.google_iam_workload_identity_pool_provider.ci_evidence"
 		if unsafeCondition(condition) && !ciEvidenceProvider {
@@ -3399,8 +3577,26 @@ func inspectResourceInvariants(resource resourceChange, violations *[]string) {
 			validateWorkforceSecretRevision(resource, after, violations)
 		}
 	case "google_iam_workload_identity_pool", "google_iam_workforce_pool":
-		requireEqual(after, "disabled", false, resource.Address, violations)
+		if resourceAddressBase(resource.Address) == "module.github_federation.google_iam_workload_identity_pool.github" {
+			if _, ok := after["disabled"].(bool); !ok {
+				*violations = append(*violations, resource.Address+" must set disabled to one explicit transition-derived boolean")
+			}
+		} else {
+			requireEqual(after, "disabled", false, resource.Address, violations)
+		}
 		validateIdentityPoolContract(resource, after, violations)
+	case "google_secret_manager_secret":
+		if resourceAddressBase(resource.Address) == "module.signing_root.google_secret_manager_secret.nix_cache_signing" {
+			requireEqual(after, "secret_id", "nix-cache-signing-key", resource.Address, violations)
+			requireEqual(after, "deletion_protection", true, resource.Address, violations)
+		}
+	case "google_secret_manager_secret_version":
+		if resourceAddressBase(resource.Address) == "module.signing_root.google_secret_manager_secret_version.nix_cache_signing" {
+			requireEqual(after, "deletion_policy", "DISABLE", resource.Address, violations)
+			if !plannedUnset(after["secret_data"]) || !plannedUnset(after["secret_data_wo"]) {
+				*violations = append(*violations, resource.Address+" must never expose Secret Manager payload bytes in a plan")
+			}
+		}
 	case "google_logging_project_bucket_config":
 		validateAuditLogBucket(resource, after, violations)
 	case "google_logging_organization_sink":
@@ -5150,6 +5346,8 @@ func approvedBinding(resourceType, address, role string) bool {
 			base == "module.github_federation.google_service_account_iam_member.infrastructure_drift" ||
 			base == "module.buildkite_federation.google_service_account_iam_member.buildkite" ||
 			base == "module.gitops_federation.google_service_account_iam_member.gitops")
+	case "google_secret_manager_secret_iam_member":
+		return base == "module.signing_root.google_secret_manager_secret_iam_member.nix_cache_accessor" && role == "roles/secretmanager.secretAccessor"
 	case "google_storage_bucket_iam_member":
 		if contract, _, ok := replicationBindingContract(resourceType, address); ok {
 			return matchesReplicationCustomRole(role, contract.roleID)
@@ -6764,7 +6962,7 @@ func nestedUnknown(value any, keys ...string) bool {
 }
 
 func sensitiveField(key string) bool {
-	if key == "plain_text_wo_version" {
+	if key == "plain_text_wo_version" || key == "secret_data_wo_version" {
 		return false
 	}
 	for _, fragment := range []string{"access_key", "access_token", "api_token", "client_secret", "credential", "password", "plain_text_wo", "private_key", "refresh_token", "secret_data"} {
@@ -6785,7 +6983,7 @@ func securityRelevantField(key string) bool {
 	}
 	for _, fragment := range []string{
 		"algorithm", "approval", "attribute_condition", "attribute_mapping", "audience", "billing_account",
-		"deletion_policy", "eligible_users", "encryption", "force_destroy", "issuer_uri", "locked", "member",
+		"deletion_policy", "deletion_protection", "eligible_users", "encryption", "force_destroy", "issuer_uri", "locked", "member",
 		"principal", "protection_level", "public_access_prevention", "purpose", "retention", "role", "soft_delete",
 		"uniform_bucket_level_access", "versioning",
 	} {

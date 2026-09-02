@@ -86,6 +86,55 @@ variable "branch_ref" {
   }
 }
 
+variable "visibility_transition" {
+  description = "Fail-closed user-operated transition from public source visibility to private-only bootstrap trust."
+  type = object({
+    state                       = string
+    activation_enabled          = bool
+    source_visibility           = string
+    final_visibility            = string
+    executor_repository_enabled = bool
+    executor_repository_id      = optional(string)
+    required_reviewer_gates     = list(string)
+    visibility_evidence_digest  = optional(string)
+    reviewer_evidence_digest    = optional(string)
+    blockers                    = list(string)
+  })
+
+  validation {
+    condition = (
+      var.visibility_transition.source_visibility == "public" &&
+      var.visibility_transition.final_visibility == "private" &&
+      !var.visibility_transition.executor_repository_enabled &&
+      var.visibility_transition.executor_repository_id == null &&
+      length(var.visibility_transition.required_reviewer_gates) == 2 &&
+      var.visibility_transition.required_reviewer_gates[0] == "security" &&
+      var.visibility_transition.required_reviewer_gates[1] == "platform" &&
+      (
+        (
+          var.visibility_transition.state == "AWAITING_PRIVATE_VISIBILITY" &&
+          !var.visibility_transition.activation_enabled &&
+          var.visibility_transition.visibility_evidence_digest == null &&
+          var.visibility_transition.reviewer_evidence_digest == null &&
+          length(var.visibility_transition.blockers) == 2 &&
+          var.visibility_transition.blockers[0] == "private-visibility-not-evidenced" &&
+          var.visibility_transition.blockers[1] == "independent-review-not-evidenced"
+        ) ||
+        (
+          var.visibility_transition.state == "PRIVATE_QUALIFIED" &&
+          var.visibility_transition.activation_enabled &&
+          can(regex("^[0-9a-f]{64}$", var.visibility_transition.visibility_evidence_digest)) &&
+          can(regex("[1-9a-f]", var.visibility_transition.visibility_evidence_digest)) &&
+          can(regex("^[0-9a-f]{64}$", var.visibility_transition.reviewer_evidence_digest)) &&
+          can(regex("[1-9a-f]", var.visibility_transition.reviewer_evidence_digest)) &&
+          length(var.visibility_transition.blockers) == 0
+        )
+      )
+    )
+    error_message = "Bootstrap trust remains disabled until exact private visibility and disjoint reviewer evidence are source-bound; an executor repository is forbidden."
+  }
+}
+
 variable "pool_ids" {
   description = "Distinct workload identity pool IDs for plan, apply, and recovery."
   type = object({

@@ -65,6 +65,13 @@ locals {
 
   github_config_federation_state = contains(["FOUNDER_BOOTSTRAPPED", "CONNECTED_QUALIFIED"], var.activation.state)
   connected_federation_state     = var.activation.state == "CONNECTED_QUALIFIED"
+  bootstrap_private_qualified = (
+    var.visibility_transition.state == "PRIVATE_QUALIFIED" &&
+    var.visibility_transition.activation_enabled &&
+    var.visibility_transition.final_visibility == "private" &&
+    var.visibility_transition.visibility_evidence_digest != null &&
+    var.visibility_transition.reviewer_evidence_digest != null
+  )
   activation_flags_valid = (
     var.github_config.activation_enabled == local.github_config_federation_state &&
     var.infrastructure_live.drift.activation_enabled == local.connected_federation_state &&
@@ -111,7 +118,7 @@ resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = each.value.pool_id
   display_name              = "bootstrap GitHub ${each.key}"
   description               = "Isolated GitHub OIDC trust for bootstrap ${each.key} operations"
-  disabled                  = false
+  disabled                  = !local.bootstrap_private_qualified
   deletion_policy           = "PREVENT"
 
   lifecycle {
@@ -127,7 +134,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = each.value.provider_id
   display_name                       = "bootstrap GitHub ${each.key}"
   description                        = "Claim-restricted GitHub provider for bootstrap ${each.key} operations"
-  disabled                           = false
+  disabled                           = !local.bootstrap_private_qualified
   deletion_policy                    = "PREVENT"
 
   attribute_mapping = {
@@ -149,7 +156,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "assertion.repository_owner == 'mindclade'",
     "assertion.repository_id == '${var.repository_id}'",
     "assertion.repository_owner_id == '${var.repository_owner_id}'",
-    "assertion.repository_visibility == 'public'",
+    "assertion.repository_visibility == 'private'",
     "assertion.ref == '${var.branch_ref}'",
     "assertion.workflow_ref == '${each.value.workflow_ref}'",
     "assertion.workflow_sha == assertion.sha",
