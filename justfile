@@ -37,8 +37,14 @@ lint:
     pyright
     cd tooling && golangci-lint run --config ../.golangci.yml ./...
     actionlint .github/workflows/*.yml
+    zizmor --no-progress --offline .github/workflows/*.yml
     yamllint --config-file .yamllint.yaml .
     markdownlint-cli2
+
+# Vulnerability scan of declared dependencies. Requires network access to the
+# OSV database, so it is deliberately separate from the hermetic lint recipe.
+security:
+    osv-scanner scan source --recursive .
 
 validate-manifests:
     go -C "{{ repo_root }}/tooling" run ./cmd/bootstrapctl validate --root "{{ repo_root }}"
@@ -98,6 +104,7 @@ validate-tofu:
 
 lint-ci:
     actionlint .github/workflows/*.yml
+    zizmor --no-progress --offline .github/workflows/*.yml
 
 test-go:
     cd tooling && go test ./... && go vet ./...
@@ -118,7 +125,7 @@ test: test-go test-python test-bazel
 flake-check:
     nix flake check --no-accept-flake-config --no-build --no-update-lock-file
 
-check: format-check lint validate-manifests validate-policy validate-tofu test flake-check
+check: format-check lint validate-manifests validate-policy validate-tofu test security flake-check
 
 validate: check
 

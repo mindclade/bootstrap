@@ -946,16 +946,22 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "recheck the checkout and live main SHA",
             ),
             (
-                ".github/dependabot.yml",
-                "package-ecosystem: opentofu",
-                "package-ecosystem: terraform",
-                "ecosystems and roots",
+                ".github/renovate.json",
+                '"terraform"',
+                '"terragrunt"',
+                "enabled managers must equal the exact approved set",
+            ),
+            (
+                ".github/renovate.json",
+                '"github>mindclade/.github"',
+                '"github>mindclade/github-config"',
+                "must extend exactly the organization preset",
             ),
             (
                 "MODULE.bazel",
                 'go_sum_from_file = "//tooling:go.sum"',
                 'go_sum_path = "//tooling:go.sum"',
-                "Dependabot Bazel file staging contract",
+                "Renovate Bazel file staging contract",
             ),
         )
         for path_name, original, replacement, diagnostic in cases:

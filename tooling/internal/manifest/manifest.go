@@ -38,7 +38,7 @@ var manifestSchemas = map[string]string{
 
 var expectedFiles = []string{
 	".bazelignore", ".bazelrc", ".bazelversion", ".editorconfig", ".golangci.yml", ".markdownlint-cli2.yaml", ".pre-commit-config.yaml", ".vscode/extensions.json", ".vscode/settings.json", ".yamllint.yaml",
-	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
+	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/pull_request_template.md", ".github/renovate.json",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
 	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "MODULE.bazel.lock", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
 	"generated/bazelrc.common", "generated/nix-bazel-policy.lock.json", "generated/nix-bazel-policy.nix", "generated/toolchain-manifest.defaults.json",
@@ -683,7 +683,7 @@ func validateWorkflowSecurity(root string) error {
 	if err := validateRecoveryWorkflowContract(root); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := validateDependabot(root); err != nil {
+	if err := validateRenovate(root); err != nil {
 		problems = append(problems, err.Error())
 	}
 	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
@@ -1085,43 +1085,43 @@ func validateTerminalSourceRechecks(root string) error {
 	return nil
 }
 
-func validateDependabot(root string) error {
-	value, err := LoadYAML(filepath.Join(root, ".github", "dependabot.yml"))
+func validateRenovate(root string) error {
+	content, err := os.ReadFile(filepath.Join(root, ".github", "renovate.json"))
 	if err != nil {
 		return err
 	}
-	document, _ := value.(map[string]any)
-	if document["version"] != float64(2) && document["version"] != 2 {
-		return errors.New(".github/dependabot.yml must use version 2")
+	var document struct {
+		Schema          string   `json:"$schema"`
+		Extends         []string `json:"extends"`
+		EnabledManagers []string `json:"enabledManagers"`
 	}
-	updates, ok := document["updates"].([]any)
-	if !ok {
-		return errors.New(".github/dependabot.yml updates must be a list")
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return fmt.Errorf("parse .github/renovate.json: %w", err)
 	}
-	var actual []string
-	for _, raw := range updates {
-		update, ok := raw.(map[string]any)
-		if !ok {
-			return errors.New(".github/dependabot.yml contains a non-object update")
-		}
-		ecosystem, _ := update["package-ecosystem"].(string)
-		directory, _ := update["directory"].(string)
-		actual = append(actual, ecosystem+"|"+directory)
+	if document.Schema != "https://docs.renovatebot.com/renovate-schema.json" {
+		return errors.New(".github/renovate.json must declare the upstream Renovate $schema")
 	}
+	if !reflect.DeepEqual(document.Extends, []string{"github>mindclade/.github"}) {
+		return errors.New(".github/renovate.json must extend exactly the organization preset github>mindclade/.github")
+	}
+	actual := append([]string(nil), document.EnabledManagers...)
 	sort.Strings(actual)
 	expected := []string{
-		"bazel|/",
-		"github-actions|/",
-		"gomod|/tooling",
-		"opentofu|/opentofu/live/recovery-plane",
-		"opentofu|/opentofu/live/root-trust",
+		"bazel-module",
+		"github-actions",
+		"gomod",
+		"nix",
+		"pre-commit",
+		"terraform",
 	}
 	if !reflect.DeepEqual(actual, expected) {
-		return errors.New(".github/dependabot.yml ecosystems and roots must equal the exact approved set")
+		return errors.New(".github/renovate.json enabled managers must equal the exact approved set")
 	}
 	moduleContent, err := os.ReadFile(filepath.Join(root, "MODULE.bazel"))
 	if err != nil {
-		return fmt.Errorf("read MODULE.bazel for Dependabot compatibility: %w", err)
+		return fmt.Errorf("read MODULE.bazel for Renovate compatibility: %w", err)
 	}
 	for _, required := range []string{
 		`go_mod_from_file = "//tooling:go.mod"`,
@@ -1129,7 +1129,7 @@ func validateDependabot(root string) error {
 		`go_deps.from_file(go_mod = go_mod_from_file)`,
 	} {
 		if !bytes.Contains(moduleContent, []byte(required)) {
-			return errors.New("MODULE.bazel must preserve the Dependabot Bazel file staging contract")
+			return errors.New("MODULE.bazel must preserve the Renovate Bazel file staging contract")
 		}
 	}
 	return nil
