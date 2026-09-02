@@ -177,7 +177,7 @@ jobs:
             fi
           done
           if ! "${qualified_source}"; then
-            echo "::error::The exact source SHA must have a successful pull-request / required check."
+            echo "::error::The exact source SHA must have a successful Pull request / required check."
             exit 1
           fi
 

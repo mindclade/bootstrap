@@ -10,7 +10,7 @@ Security and Platform Operations will acknowledge through an independently authe
 
 ## Supported source
 
-Only the protected `main` branch is supported. A commit is source-qualified only when the stable `pull-request / required` check passes. That status does not prove connected deployment. Connected changes require a fresh plan-only protected-apply run, a separate apply dispatch, the protected environments and isolated ephemeral runner group, and an expiry-bound canonical receipt signed by two distinct named approvers over the exact source, root, saved-plan digest, and plan run. Signed evidence is required for recovery observation and the final handoff ceremony; observation evidence labeled `observed-not-restored` is never restoration evidence.
+Only the protected `main` branch is supported. A commit is source-qualified only when the stable `Pull request / required` check passes. That status does not prove connected deployment. Connected changes require a fresh plan-only protected-apply run, a separate apply dispatch, the protected environments and isolated ephemeral runner group, and an expiry-bound canonical receipt signed by two distinct named approvers over the exact source, root, saved-plan digest, and plan run. Signed evidence is required for recovery observation and the final handoff ceremony; observation evidence labeled `observed-not-restored` is never restoration evidence.
 
 ## Ring-0 invariants
 
@@ -32,7 +32,7 @@ Only the protected `main` branch is supported. A commit is source-qualified only
 - Break-glass is named-human, two-approver, justified, notified, and at most two hours; Owner, Editor, and Viewer are forbidden.
 - Bootstrap grants no downstream authority over GitHub governance, normal infrastructure, GKE, Argo CD, applications, releases, or tenant data.
 
-Generated OpenTofu lock files are not source. Validation requires Google provider `7.42.0`, verifies the downloaded package bytes against the reviewed `linux_amd64` or `darwin_arm64` checksum, disables direct installation for that provider, and initializes only from the verified temporary mirror. A checksum merely present in a generated lock file is insufficient. Bazel dependencies are exact-versioned and use Bazel Central Registry integrity metadata, but the blueprint excludes a generated `MODULE.bazel.lock`; do not claim a committed transitive dependency lock.
+Generated OpenTofu provider locks are not source. Validation requires Google provider `7.42.0`, verifies the downloaded package bytes against the reviewed `linux_amd64` or `darwin_arm64` checksum, disables direct installation for that provider, and initializes only from the verified temporary mirror. A checksum merely present in a generated provider lock is insufficient. Bazel dependencies are exact-versioned, use Bazel Central Registry integrity metadata, and are closed transitively by the committed `MODULE.bazel.lock`; lock drift fails closed.
 
 The scheduled isolated job proves only source and restore-contract consistency. The optional manual non-qualifying read-only observation additionally binds a redacted control-summary digest, canonical active KMS key-version, public-key digest, six-sink configuration, Storage Data Access configuration, and delivery results. Neither result proves a restoration or deployment; connected qualification requires an authorized controlled generation/digest-bound restore into an isolated destination and verified reattachment of the dependent consumers.
 

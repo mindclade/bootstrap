@@ -449,7 +449,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["files"], 103)
+        self.assertEqual(payload["files"], 112)
         self.assertEqual(payload["manifests"], 7)
 
     @unittest.skipIf(
@@ -842,6 +842,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         workflow = (self.repository_root / ".github" / "workflows" / "pull-request.yml").read_text(
             encoding="utf-8"
         )
+        self.assertTrue(workflow.startswith("name: Pull request\n"))
         self.assertIn(
             "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
             workflow,
@@ -928,6 +929,12 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "path: ${{ runner.temp }}/observation-evidence/",
                 "path: ${{ runner.temp }}/recovery-inventory/",
                 "explicitly non-qualifying redacted signed bundle",
+            ),
+            (
+                ".github/workflows/recovery-verification.yml",
+                "Remove recovery credentials and raw observation material",
+                "Retain raw recovery credentials and observation material",
+                "must always remove credentials and raw runner-temporary material",
             ),
             (
                 ".github/workflows/recovery-verification.yml",

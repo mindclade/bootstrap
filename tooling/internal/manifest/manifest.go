@@ -37,10 +37,10 @@ var manifestSchemas = map[string]string{
 }
 
 var expectedFiles = []string{
-	".editorconfig", ".golangci.yml", ".markdownlint-cli2.yaml", ".pre-commit-config.yaml", ".vscode/extensions.json", ".vscode/settings.json", ".yamllint.yaml",
+	".bazelignore", ".bazelrc", ".bazelversion", ".editorconfig", ".golangci.yml", ".markdownlint-cli2.yaml", ".pre-commit-config.yaml", ".vscode/extensions.json", ".vscode/settings.json", ".yamllint.yaml",
 	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
-	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
+	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "MODULE.bazel.lock", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",
 	"manifests/recovery-policy.yaml", "manifests/signing-roots.yaml", "manifests/state-backends.yaml", "manifests/trust-anchors.yaml",
 	"opentofu/live/recovery-plane/backend.tf", "opentofu/live/recovery-plane/main.tf", "opentofu/live/recovery-plane/outputs.tf",
@@ -544,6 +544,7 @@ var workflowContracts = map[string]workflowContract{
 			"observation": "infrastructure-apply",
 		},
 		actions: []string{
+			"DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25",
 			"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
 			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -552,7 +553,6 @@ var workflowContracts = map[string]workflowContract{
 			"actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
 			"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 			"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-			"bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86",
 			"google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
 			"google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db",
 			"opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4",
@@ -712,7 +712,7 @@ func validateRecoveryWorkflowContract(root string) error {
 	}
 	if !exactStringMap(workflow["env"], map[string]string{
 		"GO_VERSION": "1.26.7", "JUST_VERSION": "1.58.0", "PYTHON_VERSION": "3.14.7",
-		"TOFU_VERSION": qualifiedTofuVersion, "USE_BAZEL_VERSION": "9.1.1",
+		"TOFU_VERSION": qualifiedTofuVersion,
 	}) {
 		problems = append(problems, "recovery workflow tool versions must equal the exact qualified set")
 	}
@@ -848,6 +848,33 @@ func validateRecoveryWorkflowContract(root string) error {
 		"if-no-files-found": "error", "retention-days": 90,
 	}) {
 		problems = append(problems, "observation artifact upload must retain only the exact explicitly non-qualifying redacted signed bundle")
+	}
+	cleanup := step(observation, "Remove recovery credentials and raw observation material")
+	cleanupRun, _ := cleanup["run"].(string)
+	cleanupSnippets := []string{
+		`rm -f --`,
+		`"${RUNNER_TEMP}/recovery-google-credentials.json"`,
+		`"${RUNNER_TEMP}/bootstrapctl"`,
+		`"${RUNNER_TEMP}/recovery-control-summary.json"`,
+		`"${RUNNER_TEMP}/recovery-control-summary.next.json"`,
+		`rm -rf --`,
+		`"${RUNNER_TEMP}/approval"`,
+		`"${RUNNER_TEMP}/recovery-inventory"`,
+		`"${RUNNER_TEMP}/observation-evidence"`,
+	}
+	validCleanup := cleanup != nil && cleanup["if"] == "always()" && cleanup["shell"] == "bash"
+	for _, snippet := range cleanupSnippets {
+		validCleanup = validCleanup && strings.Contains(cleanupRun, snippet)
+	}
+	observationSteps, _ := observation["steps"].([]any)
+	if len(observationSteps) == 0 {
+		validCleanup = false
+	} else {
+		lastStep, _ := observationSteps[len(observationSteps)-1].(map[string]any)
+		validCleanup = validCleanup && lastStep["name"] == "Remove recovery credentials and raw observation material"
+	}
+	if !validCleanup {
+		problems = append(problems, "recovery observation must always remove credentials and raw runner-temporary material in its final step")
 	}
 
 	sinkStep := step(observation, "Read backend and recovery generations without logging inventory")
@@ -1430,7 +1457,7 @@ func validateTrackedPaths(root string) error {
 
 func ephemeral(path string) bool {
 	base := filepath.Base(path)
-	return base == ".DS_Store" || base == "MODULE.bazel.lock" || strings.HasPrefix(base, "bazel-") || path == "tooling/bootstrapctl" || base == ".terraform.lock.hcl" || strings.HasSuffix(base, ".tfplan") ||
+	return base == ".DS_Store" || strings.HasPrefix(base, "bazel-") || path == "tooling/bootstrapctl" || base == ".terraform.lock.hcl" || strings.HasSuffix(base, ".tfplan") ||
 		strings.HasSuffix(base, ".tfplan.json") || strings.HasSuffix(base, ".evidence.json") ||
 		strings.HasSuffix(base, ".pyc") || strings.Contains(path, "/__pycache__/")
 }

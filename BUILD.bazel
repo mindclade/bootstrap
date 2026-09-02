@@ -29,7 +29,6 @@ filegroup(
         ".markdownlint-cli2.yaml",
         ".pre-commit-config.yaml",
         ".yamllint.yaml",
-        "CONTRIBUTING.md",
         "LICENSE",
         "MODULE.bazel.lock",
         "biome.json",
