@@ -1045,7 +1045,14 @@ func Analyze(data []byte) (Summary, error) {
 		return Summary{}, errors.New("parse OpenTofu plan JSON: resource_changes must be an array")
 	}
 	if parsed.FormatVersion != "1.2" || parsed.TerraformVersion != "1.12.6" {
-		return Summary{}, errors.New("parse OpenTofu plan JSON: unsupported or incomplete plan format metadata")
+		// Name the mismatch. The pin is deliberate, so the usual cause is a local
+		// toolchain that is not the reviewed one, and an opaque message sends the
+		// reader looking for a policy or plan defect that is not there.
+		return Summary{}, fmt.Errorf(
+			"parse OpenTofu plan JSON: unsupported or incomplete plan format metadata: "+
+				"got format_version %q and terraform_version %q, requires %q and %q",
+			parsed.FormatVersion, parsed.TerraformVersion, "1.2", "1.12.6",
+		)
 	}
 	contract, present, contractError := signingContractFromVariables(parsed.Variables)
 	var result Summary
