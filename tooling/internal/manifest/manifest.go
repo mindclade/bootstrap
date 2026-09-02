@@ -41,6 +41,7 @@ var expectedFiles = []string{
 	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
 	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "MODULE.bazel.lock", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
+	"generated/bazelrc.common", "generated/nix-bazel-policy.lock.json", "generated/nix-bazel-policy.nix", "generated/toolchain-manifest.defaults.json",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",
 	"manifests/recovery-policy.yaml", "manifests/signing-roots.yaml", "manifests/state-backends.yaml", "manifests/trust-anchors.yaml",
 	"opentofu/live/recovery-plane/backend.tf", "opentofu/live/recovery-plane/main.tf", "opentofu/live/recovery-plane/outputs.tf",
@@ -63,7 +64,7 @@ var expectedFiles = []string{
 	"runbooks/break-glass-activation.md", "runbooks/root-identity-compromise.md", "runbooks/signing-root-recovery.md", "runbooks/state-backend-unavailable.md",
 	"schemas/v1/audit_root.schema.json", "schemas/v1/break_glass.schema.json", "schemas/v1/federation.schema.json",
 	"schemas/v1/recovery_policy.schema.json", "schemas/v1/signing_root.schema.json", "schemas/v1/state_backend.schema.json", "schemas/v1/trust_anchor.schema.json",
-	"tests/contract/test_manifest_schemas.py", "tests/failure/test_partial_bootstrap_apply.py", "tests/plan/test_minimum_privilege.py", "tests/recovery/test_isolated_restore.py",
+	"tests/contract/test_generated_policy.py", "tests/contract/test_manifest_schemas.py", "tests/failure/test_partial_bootstrap_apply.py", "tests/plan/test_minimum_privilege.py", "tests/recovery/test_isolated_restore.py",
 	"tooling/BUILD.bazel", "tooling/cmd/bootstrapctl/main.go", "tooling/go.mod", "tooling/go.sum",
 	"tooling/internal/evidence/evidence.go", "tooling/internal/manifest/manifest.go", "tooling/internal/plan/plan.go", "tooling/internal/recovery/recovery.go",
 }
@@ -1470,7 +1471,7 @@ func validateTrackedPaths(root string) error {
 
 func ephemeral(path string) bool {
 	base := filepath.Base(path)
-	return base == ".DS_Store" || strings.HasPrefix(base, "bazel-") || path == "tooling/bootstrapctl" || base == ".terraform.lock.hcl" || strings.HasSuffix(base, ".tfplan") ||
+	return path == ".git" || base == ".DS_Store" || strings.HasPrefix(base, "bazel-") || path == "tooling/bootstrapctl" || base == ".terraform.lock.hcl" || strings.HasSuffix(base, ".tfplan") ||
 		strings.HasSuffix(base, ".tfplan.json") || strings.HasSuffix(base, ".evidence.json") ||
 		strings.HasSuffix(base, ".pyc") || strings.Contains(path, "/__pycache__/")
 }
@@ -1964,6 +1965,44 @@ func (c *compiler) validateContracts() {
 		"roles/storage.objectViewer",
 	}, append(githubBase, "serviceAccounts", "recovery", "roles")...)
 
+	transitionBase := []string{"spec", "bootstrapVisibilityTransition"}
+	c.expect(federation, "public", append(transitionBase, "sourceVisibility")...)
+	c.expect(federation, "private", append(transitionBase, "finalVisibility")...)
+	c.expect(federation, "mindclade/bootstrap", append(transitionBase, "repositoryFullName")...)
+	c.expect(federation, "316676129", append(transitionBase, "repositoryOwnerId")...)
+	c.expect(federation, "1350991612", append(transitionBase, "repositoryId")...)
+	c.expect(federation, false, append(transitionBase, "executorRepositoryEnabled")...)
+	c.expect(federation, nil, append(transitionBase, "executorRepositoryId")...)
+	c.expectStrings(federation, []string{"security", "platform"}, append(transitionBase, "requiredReviewerGates")...)
+	transitionState := c.stringAt(federation, append(transitionBase, "state")...)
+	transitionActivated := c.boolAt(federation, append(transitionBase, "activationEnabled")...)
+	switch transitionState {
+	case "AWAITING_PRIVATE_VISIBILITY":
+		if transitionActivated {
+			c.problem("%s.spec.bootstrapVisibilityTransition.activationEnabled must remain false before private qualification", federation)
+		}
+		c.expect(federation, nil, append(transitionBase, "visibilityEvidenceDigest")...)
+		c.expect(federation, nil, append(transitionBase, "reviewerEvidenceDigest")...)
+		c.expectStrings(federation, []string{
+			"private-visibility-not-evidenced",
+			"independent-review-not-evidenced",
+		}, append(transitionBase, "blockers")...)
+	case "PRIVATE_QUALIFIED":
+		if !transitionActivated {
+			c.problem("%s.spec.bootstrapVisibilityTransition.activationEnabled must be true after private qualification", federation)
+		}
+		visibilityDigest := c.stringAt(federation, append(transitionBase, "visibilityEvidenceDigest")...)
+		reviewerDigest := c.stringAt(federation, append(transitionBase, "reviewerEvidenceDigest")...)
+		for field, digest := range map[string]string{"visibilityEvidenceDigest": visibilityDigest, "reviewerEvidenceDigest": reviewerDigest} {
+			if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(digest) || digest == strings.Repeat("0", 64) {
+				c.problem("%s.spec.bootstrapVisibilityTransition.%s must be a nonzero lowercase SHA-256 digest", federation, field)
+			}
+		}
+		c.expectStrings(federation, []string{}, append(transitionBase, "blockers")...)
+	default:
+		c.problem("%s.spec.bootstrapVisibilityTransition.state must be AWAITING_PRIVATE_VISIBILITY or PRIVATE_QUALIFIED", federation)
+	}
+
 	githubConfigBase := []string{"spec", "workloadIdentityProviders", "github-config"}
 	c.expect(federation, "github", append(githubConfigBase, "platform")...)
 	c.expect(federation, "identity-root", append(githubConfigBase, "projectRef")...)
@@ -2116,7 +2155,64 @@ func (c *compiler) validateContracts() {
 	c.expect(signing, "signing-root", "spec", "projectRef")
 	c.expect(signing, "us-central1", "spec", "location")
 	c.expect(signing, "bootstrap-signing", "spec", "keyRing")
-	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export"}, "spec", "keys")
+	c.expectKeys(signing, []string{"bootstrap-handoff", "audit-anchor", "recovery-evidence", "connected-observation-evidence", "github-config-plan-evidence", "infrastructure-export", "supply-chain-provenance"}, "spec", "keys")
+	nixSigningBase := []string{"spec", "nixCacheSigningRoot"}
+	c.expect(signing, "nix-cache-signing-key", append(nixSigningBase, "secretId")...)
+	c.expect(signing, "ED25519", append(nixSigningBase, "algorithm")...)
+	c.expect(signing, "SECRET_MANAGER_WRITE_ONLY", append(nixSigningBase, "secretStorage")...)
+	c.expectStrings(signing, []string{"security", "platform"}, append(nixSigningBase, "requiredReviewerGates")...)
+	nixSigningState := c.stringAt(signing, append(nixSigningBase, "state")...)
+	nixSigningActivated := c.boolAt(signing, append(nixSigningBase, "activationEnabled")...)
+	switch nixSigningState {
+	case "DISABLED":
+		if nixSigningActivated {
+			c.problem("%s.spec.nixCacheSigningRoot.activationEnabled must remain false before signing-root qualification", signing)
+		}
+		c.expect(signing, nil, append(nixSigningBase, "secretVersionWriteOnly")...)
+		c.expectStrings(signing, []string{}, append(nixSigningBase, "publicKeys")...)
+		c.expect(signing, nil, append(nixSigningBase, "publicKeyDigest")...)
+		c.expectStrings(signing, []string{}, append(nixSigningBase, "accessorPrincipals")...)
+		c.expect(signing, nil, append(nixSigningBase, "reviewerEvidenceDigest")...)
+		c.expectStrings(signing, []string{
+			"cache-public-key-not-committed",
+			"secret-version-not-created",
+			"independent-review-not-evidenced",
+		}, append(nixSigningBase, "blockers")...)
+	case "ACTIVATED":
+		if !nixSigningActivated {
+			c.problem("%s.spec.nixCacheSigningRoot.activationEnabled must be true after signing-root qualification", signing)
+		}
+		if c.intAt(signing, append(nixSigningBase, "secretVersionWriteOnly")...) < 1 {
+			c.problem("%s.spec.nixCacheSigningRoot.secretVersionWriteOnly must be a positive write-only version", signing)
+		}
+		publicKeys := c.stringsAt(signing, append(nixSigningBase, "publicKeys")...)
+		if len(publicKeys) == 0 {
+			c.problem("%s.spec.nixCacheSigningRoot.publicKeys must commit at least one Nix Ed25519 public key", signing)
+		}
+		publicKeyPattern := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*-v[1-9][0-9]*:[A-Za-z0-9+/]{43}=$`)
+		for _, publicKey := range publicKeys {
+			if !publicKeyPattern.MatchString(publicKey) {
+				c.problem("%s.spec.nixCacheSigningRoot.publicKeys contains a noncanonical Nix Ed25519 public key", signing)
+			}
+		}
+		encodedPublicKeys, _ := json.Marshal(publicKeys)
+		publicKeyDigest := fmt.Sprintf("sha256:%x", sha256.Sum256(encodedPublicKeys))
+		if c.stringAt(signing, append(nixSigningBase, "publicKeyDigest")...) != publicKeyDigest {
+			c.problem("%s.spec.nixCacheSigningRoot.publicKeyDigest must equal SHA-256 over the canonical publicKeys JSON array", signing)
+		}
+		accessors := c.stringsAt(signing, append(nixSigningBase, "accessorPrincipals")...)
+		if len(accessors) == 0 {
+			c.problem("%s.spec.nixCacheSigningRoot.accessorPrincipals must name at least one explicit cache signer", signing)
+		}
+		c.requireServiceAccountPrincipals("Nix cache signing accessors", accessors)
+		reviewerDigest := c.stringAt(signing, append(nixSigningBase, "reviewerEvidenceDigest")...)
+		if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(reviewerDigest) || reviewerDigest == strings.Repeat("0", 64) {
+			c.problem("%s.spec.nixCacheSigningRoot.reviewerEvidenceDigest must be a nonzero lowercase SHA-256 digest", signing)
+		}
+		c.expectStrings(signing, []string{}, append(nixSigningBase, "blockers")...)
+	default:
+		c.problem("%s.spec.nixCacheSigningRoot.state must be DISABLED or ACTIVATED", signing)
+	}
 	administratorRefs := c.lookup(signing, "spec", "administrators")
 	if items, ok := administratorRefs.([]any); !ok || len(items) != 2 {
 		c.problem("%s.spec.administrators must contain exactly two references", signing)
@@ -2131,6 +2227,7 @@ func (c *compiler) validateContracts() {
 		"recovery-evidence":              {"RECOVERY_EVIDENCE_SIGNER"},
 		"connected-observation-evidence": {"CONNECTED_OBSERVATION_EVIDENCE_SIGNER"},
 		"github-config-plan-evidence":    {"GITHUB_CONFIG_PLAN_EVIDENCE_SIGNER"},
+		"supply-chain-provenance":        {"SUPPLY_CHAIN_PROVENANCE_SIGNER"},
 		"infrastructure-export": {
 			"INFRASTRUCTURE_DEVELOPMENT_EXPORT_SIGNER",
 			"INFRASTRUCTURE_STAGING_EXPORT_SIGNER",
@@ -2463,6 +2560,18 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		"service_account_ids":  githubServiceAccounts,
 		"audiences":            githubAudiences,
 		"workflow_refs":        githubWorkflowRefs,
+		"visibility_transition": map[string]any{
+			"state":                       c.stringAt(federation, "spec", "bootstrapVisibilityTransition", "state"),
+			"activation_enabled":          c.boolAt(federation, "spec", "bootstrapVisibilityTransition", "activationEnabled"),
+			"source_visibility":           c.stringAt(federation, "spec", "bootstrapVisibilityTransition", "sourceVisibility"),
+			"final_visibility":            c.stringAt(federation, "spec", "bootstrapVisibilityTransition", "finalVisibility"),
+			"executor_repository_enabled": c.boolAt(federation, "spec", "bootstrapVisibilityTransition", "executorRepositoryEnabled"),
+			"executor_repository_id":      c.lookup(federation, "spec", "bootstrapVisibilityTransition", "executorRepositoryId"),
+			"required_reviewer_gates":     c.stringsAt(federation, "spec", "bootstrapVisibilityTransition", "requiredReviewerGates"),
+			"visibility_evidence_digest":  c.lookup(federation, "spec", "bootstrapVisibilityTransition", "visibilityEvidenceDigest"),
+			"reviewer_evidence_digest":    c.lookup(federation, "spec", "bootstrapVisibilityTransition", "reviewerEvidenceDigest"),
+			"blockers":                    c.stringsAt(federation, "spec", "bootstrapVisibilityTransition", "blockers"),
+		},
 	}
 
 	githubConfigBase := []string{"spec", "workloadIdentityProviders", "github-config"}
@@ -2671,6 +2780,20 @@ func (c *compiler) rootTrustVariables() map[string]any {
 		}
 		signingPrincipals = append(signingPrincipals, signers...)
 	}
+	nixCacheSigning := map[string]any{
+		"state":                     c.stringAt(signing, "spec", "nixCacheSigningRoot", "state"),
+		"activation_enabled":        c.boolAt(signing, "spec", "nixCacheSigningRoot", "activationEnabled"),
+		"secret_id":                 c.stringAt(signing, "spec", "nixCacheSigningRoot", "secretId"),
+		"algorithm":                 c.stringAt(signing, "spec", "nixCacheSigningRoot", "algorithm"),
+		"secret_storage":            c.stringAt(signing, "spec", "nixCacheSigningRoot", "secretStorage"),
+		"secret_version_write_only": c.lookup(signing, "spec", "nixCacheSigningRoot", "secretVersionWriteOnly"),
+		"public_keys":               c.stringsAt(signing, "spec", "nixCacheSigningRoot", "publicKeys"),
+		"public_key_digest":         c.lookup(signing, "spec", "nixCacheSigningRoot", "publicKeyDigest"),
+		"accessor_principals":       c.stringsAt(signing, "spec", "nixCacheSigningRoot", "accessorPrincipals"),
+		"required_reviewer_gates":   c.stringsAt(signing, "spec", "nixCacheSigningRoot", "requiredReviewerGates"),
+		"reviewer_evidence_digest":  c.lookup(signing, "spec", "nixCacheSigningRoot", "reviewerEvidenceDigest"),
+		"blockers":                  c.stringsAt(signing, "spec", "nixCacheSigningRoot", "blockers"),
+	}
 
 	requesters := c.resolvedMapValues(breakGlass, "spec", "requesters")
 	approvers := c.resolvedMapValues(breakGlass, "spec", "approvers")
@@ -2762,6 +2885,7 @@ func (c *compiler) rootTrustVariables() map[string]any {
 			"key_ring_name":  c.stringAt(signing, "spec", "keyRing"),
 			"administrators": signingAdministrators,
 			"keys":           signingKeys,
+			"nix_cache":      nixCacheSigning,
 		},
 		"break_glass": map[string]any{
 			"requester_principals":    requesters,

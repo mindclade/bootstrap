@@ -12,7 +12,14 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["projectRef", "location", "keyRing", "administrators", "keys"],
+      "required": [
+        "projectRef",
+        "location",
+        "keyRing",
+        "administrators",
+        "nixCacheSigningRoot",
+        "keys"
+      ],
       "properties": {
         "projectRef": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
         "location": { "const": "us-central1" },
@@ -23,6 +30,7 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/envRef" }
         },
+        "nixCacheSigningRoot": { "$ref": "#/$defs/nixCacheSigningRoot" },
         "keys": {
           "type": "object",
           "additionalProperties": false,
@@ -32,7 +40,8 @@
             "recovery-evidence",
             "connected-observation-evidence",
             "github-config-plan-evidence",
-            "infrastructure-export"
+            "infrastructure-export",
+            "supply-chain-provenance"
           ],
           "properties": {
             "bootstrap-handoff": { "$ref": "#/$defs/key" },
@@ -40,7 +49,8 @@
             "recovery-evidence": { "$ref": "#/$defs/key" },
             "connected-observation-evidence": { "$ref": "#/$defs/key" },
             "github-config-plan-evidence": { "$ref": "#/$defs/key" },
-            "infrastructure-export": { "$ref": "#/$defs/key" }
+            "infrastructure-export": { "$ref": "#/$defs/key" },
+            "supply-chain-provenance": { "$ref": "#/$defs/key" }
           }
         }
       }
@@ -65,6 +75,95 @@
           "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" } }
         }
       }
+    },
+    "nixCacheSigningRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "activationEnabled",
+        "secretId",
+        "algorithm",
+        "secretStorage",
+        "secretVersionWriteOnly",
+        "publicKeys",
+        "publicKeyDigest",
+        "accessorPrincipals",
+        "requiredReviewerGates",
+        "reviewerEvidenceDigest",
+        "blockers"
+      ],
+      "properties": {
+        "state": { "enum": ["DISABLED", "ACTIVATED"] },
+        "activationEnabled": { "type": "boolean" },
+        "secretId": { "const": "nix-cache-signing-key" },
+        "algorithm": { "const": "ED25519" },
+        "secretStorage": { "const": "SECRET_MANAGER_WRITE_ONLY" },
+        "secretVersionWriteOnly": { "type": ["integer", "null"], "minimum": 1 },
+        "publicKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*-v[1-9][0-9]*:[A-Za-z0-9+/]{43}=$"
+          }
+        },
+        "publicKeyDigest": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "accessorPrincipals": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^serviceAccount:[a-z][a-z0-9-]{1,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$"
+          }
+        },
+        "requiredReviewerGates": {
+          "type": "array",
+          "prefixItems": [{ "const": "security" }, { "const": "platform" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "reviewerEvidenceDigest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": { "const": "DISABLED" },
+            "activationEnabled": { "const": false },
+            "secretVersionWriteOnly": { "type": "null" },
+            "publicKeys": { "maxItems": 0 },
+            "publicKeyDigest": { "type": "null" },
+            "accessorPrincipals": { "maxItems": 0 },
+            "reviewerEvidenceDigest": { "type": "null" },
+            "blockers": { "minItems": 1 }
+          }
+        },
+        {
+          "properties": {
+            "state": { "const": "ACTIVATED" },
+            "activationEnabled": { "const": true },
+            "secretVersionWriteOnly": { "type": "integer", "minimum": 1 },
+            "publicKeys": { "minItems": 1 },
+            "publicKeyDigest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "accessorPrincipals": { "minItems": 1 },
+            "reviewerEvidenceDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "blockers": { "maxItems": 0 }
+          }
+        }
+      ]
     },
     "key": {
       "type": "object",

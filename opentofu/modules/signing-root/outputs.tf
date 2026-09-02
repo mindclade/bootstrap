@@ -32,3 +32,14 @@ output "keys" {
     }
   }
 }
+
+output "nix_cache_signing_root" {
+  description = "Non-secret Nix cache signing-root metadata. Private key bytes and Secret Manager payloads are never outputs."
+  value = {
+    state             = var.nix_cache.state
+    algorithm         = var.nix_cache.algorithm
+    secret_resource   = google_secret_manager_secret.nix_cache_signing.id
+    public_keys       = var.nix_cache.public_keys
+    public_key_digest = var.nix_cache.public_key_digest
+  }
+}

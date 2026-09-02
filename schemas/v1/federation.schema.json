@@ -12,8 +12,14 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["workforce", "workloadIdentityProviders", "activation"],
+      "required": [
+        "bootstrapVisibilityTransition",
+        "workforce",
+        "workloadIdentityProviders",
+        "activation"
+      ],
       "properties": {
+        "bootstrapVisibilityTransition": { "$ref": "#/$defs/bootstrapVisibilityTransition" },
         "workforce": { "$ref": "#/$defs/workforce" },
         "workloadIdentityProviders": {
           "type": "object",
@@ -244,6 +250,85 @@
     }
   },
   "$defs": {
+    "bootstrapVisibilityTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "activationEnabled",
+        "sourceVisibility",
+        "finalVisibility",
+        "repositoryFullName",
+        "repositoryOwnerId",
+        "repositoryId",
+        "executorRepositoryEnabled",
+        "executorRepositoryId",
+        "requiredReviewerGates",
+        "visibilityEvidenceDigest",
+        "reviewerEvidenceDigest",
+        "blockers"
+      ],
+      "properties": {
+        "state": { "enum": ["AWAITING_PRIVATE_VISIBILITY", "PRIVATE_QUALIFIED"] },
+        "activationEnabled": { "type": "boolean" },
+        "sourceVisibility": { "const": "public" },
+        "finalVisibility": { "const": "private" },
+        "repositoryFullName": { "const": "mindclade/bootstrap" },
+        "repositoryOwnerId": { "const": "316676129" },
+        "repositoryId": { "const": "1350991612" },
+        "executorRepositoryEnabled": { "const": false },
+        "executorRepositoryId": { "type": "null" },
+        "requiredReviewerGates": {
+          "type": "array",
+          "prefixItems": [{ "const": "security" }, { "const": "platform" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "visibilityEvidenceDigest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reviewerEvidenceDigest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": { "const": "AWAITING_PRIVATE_VISIBILITY" },
+            "activationEnabled": { "const": false },
+            "visibilityEvidenceDigest": { "type": "null" },
+            "reviewerEvidenceDigest": { "type": "null" },
+            "blockers": {
+              "prefixItems": [
+                { "const": "private-visibility-not-evidenced" },
+                { "const": "independent-review-not-evidenced" }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "state": { "const": "PRIVATE_QUALIFIED" },
+            "activationEnabled": { "const": true },
+            "visibilityEvidenceDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "reviewerEvidenceDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "blockers": { "maxItems": 0 }
+          }
+        }
+      ]
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,

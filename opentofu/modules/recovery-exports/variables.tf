@@ -184,8 +184,8 @@ variable "public_trust_metadata" {
 
   validation {
     condition = (
-      length(var.public_trust_metadata.signing_key_versions) == 6 &&
-      length(var.public_trust_metadata.signing_public_key_pem_sha256) == 6 && alltrue([
+      length(var.public_trust_metadata.signing_key_versions) == 7 &&
+      length(var.public_trust_metadata.signing_public_key_pem_sha256) == 7 && alltrue([
         for name in [
           "audit-anchor",
           "bootstrap-handoff",
@@ -193,6 +193,7 @@ variable "public_trust_metadata" {
           "github-config-plan-evidence",
           "infrastructure-export",
           "recovery-evidence",
+          "supply-chain-provenance",
         ] :
         contains(keys(var.public_trust_metadata.signing_key_versions), name) &&
         contains(keys(var.public_trust_metadata.signing_public_key_pem_sha256), name) &&
@@ -201,7 +202,7 @@ variable "public_trust_metadata" {
         length(regexall("[1-9a-f]", var.public_trust_metadata.signing_public_key_pem_sha256[name])) > 0
       ])
     )
-    error_message = "Signing trust metadata must contain the exact six canonical public CryptoKeyVersion names and nonzero lowercase PEM SHA-256 digests."
+    error_message = "Signing trust metadata must contain the exact seven canonical public CryptoKeyVersion names and nonzero lowercase PEM SHA-256 digests."
   }
 
   validation {

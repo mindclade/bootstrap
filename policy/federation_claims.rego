@@ -94,6 +94,51 @@ has_wildcard(value) if {
 	contains(value, "*")
 }
 
+valid_bootstrap_visibility_transition(transition) if {
+	transition.state == "AWAITING_PRIVATE_VISIBILITY"
+	transition.activationEnabled == false
+	transition.sourceVisibility == "public"
+	transition.finalVisibility == "private"
+	transition.repositoryFullName == "mindclade/bootstrap"
+	transition.repositoryOwnerId == "316676129"
+	transition.repositoryId == "1350991612"
+	transition.executorRepositoryEnabled == false
+	transition.executorRepositoryId == null
+	transition.requiredReviewerGates == ["security", "platform"]
+	transition.visibilityEvidenceDigest == null
+	transition.reviewerEvidenceDigest == null
+	transition.blockers == ["private-visibility-not-evidenced", "independent-review-not-evidenced"]
+}
+
+valid_bootstrap_visibility_transition(transition) if {
+	transition.state == "PRIVATE_QUALIFIED"
+	transition.activationEnabled == true
+	transition.sourceVisibility == "public"
+	transition.finalVisibility == "private"
+	transition.repositoryFullName == "mindclade/bootstrap"
+	transition.repositoryOwnerId == "316676129"
+	transition.repositoryId == "1350991612"
+	transition.executorRepositoryEnabled == false
+	transition.executorRepositoryId == null
+	transition.requiredReviewerGates == ["security", "platform"]
+	regex.match("^[0-9a-f]{64}$", transition.visibilityEvidenceDigest)
+	regex.match("[1-9a-f]", transition.visibilityEvidenceDigest)
+	regex.match("^[0-9a-f]{64}$", transition.reviewerEvidenceDigest)
+	regex.match("[1-9a-f]", transition.reviewerEvidenceDigest)
+	count(transition.blockers) == 0
+}
+
+deny contains violation if {
+	input.kind == "IdentityFederation"
+	transition := object.get(input.spec, "bootstrapVisibilityTransition", {})
+	not valid_bootstrap_visibility_transition(transition)
+	violation := {
+		"code": "BOOTSTRAP_VISIBILITY_TRANSITION_INVALID",
+		"message": "bootstrap OIDC must remain disabled until the exact repository is privately visible and independently reviewed; an executor repository is forbidden",
+		"resource": "bootstrapVisibilityTransition",
+	}
+}
+
 has_wildcard(value) if {
 	contains(value, "?")
 }

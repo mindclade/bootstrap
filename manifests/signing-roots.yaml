@@ -11,6 +11,24 @@ spec:
         env: KMS_ADMIN_PRINCIPAL_1
     - valueFrom:
         env: KMS_ADMIN_PRINCIPAL_2
+  nixCacheSigningRoot:
+    state: DISABLED
+    activationEnabled: false
+    secretId: nix-cache-signing-key
+    algorithm: ED25519
+    secretStorage: SECRET_MANAGER_WRITE_ONLY
+    secretVersionWriteOnly: null
+    publicKeys: []
+    publicKeyDigest: null
+    accessorPrincipals: []
+    requiredReviewerGates:
+      - security
+      - platform
+    reviewerEvidenceDigest: null
+    blockers:
+      - cache-public-key-not-committed
+      - secret-version-not-created
+      - independent-review-not-evidenced
   keys:
     bootstrap-handoff:
       purpose: ASYMMETRIC_SIGN
@@ -102,3 +120,17 @@ spec:
             env: INFRASTRUCTURE_PRODUCTION_EXPORT_SIGNER
         - valueFrom:
             env: INFRASTRUCTURE_RESTRICTED_EXPORT_SIGNER
+    supply-chain-provenance:
+      purpose: ASYMMETRIC_SIGN
+      algorithm: EC_SIGN_P256_SHA256
+      protectionLevel: HSM
+      rotationDays: 90
+      activeVersionRef: v20260829
+      versions:
+        v20260829:
+          activationWindowStart: "2026-08-29T00:00:00Z"
+          rotationDeadline: "2026-11-27T00:00:00Z"
+      deletionProtection: true
+      signers:
+        - valueFrom:
+            env: SUPPLY_CHAIN_PROVENANCE_SIGNER

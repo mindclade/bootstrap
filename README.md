@@ -8,7 +8,7 @@ Bootstrap has no authority over ordinary cloud infrastructure, GitHub governance
 
 There are three distinct gates:
 
-1. **Source qualification** is credential-free. `just validate` checks the exact tree, strict manifests/schemas/references, secret hygiene, OpenTofu formatting and backend-free validation, and Rego policy. `just test` runs Go/Bazel and contract, plan, failure, and isolated-recovery tests. Validation downloads Google provider `7.42.0` into a temporary local mirror, verifies the exact package bytes against the reviewed checksum for the current supported platform (`linux_amd64` or `darwin_arm64`), disables direct installation for that provider, and initializes both roots only from the verified mirror. An offline operator may supply an absolute `BOOTSTRAP_PROVIDER_MIRROR`; the same exact package hash is still mandatory. Generated OpenTofu provider locks are excluded by the blueprint. Bazel dependencies are exact-versioned, resolved with Bazel Central Registry integrity metadata, and closed transitively by the committed `MODULE.bazel.lock`; ordinary builds fail instead of updating it. A pass proves only that this source is internally qualified.
+1. **Source qualification** is credential-free. `just validate` checks the exact tree, strict manifests/schemas/references, secret hygiene, OpenTofu formatting and backend-free validation, and Rego policy. `just test` runs Go/Bazel and contract, plan, failure, and isolated-recovery tests. Validation downloads Google provider `7.42.0` into a temporary local mirror, verifies the exact package bytes against the reviewed checksum for the current supported platform (`linux_arm64`, `linux_amd64`, or `darwin_arm64`), disables direct installation for that provider, and initializes both roots only from the verified mirror. An offline operator may supply an absolute `BOOTSTRAP_PROVIDER_MIRROR`; the same exact package hash is still mandatory. Generated OpenTofu provider locks are excluded by the blueprint. Bazel dependencies are exact-versioned, resolved with Bazel Central Registry integrity metadata, and closed transitively by the committed `MODULE.bazel.lock`; ordinary builds fail instead of updating it. A pass proves only that this source is internally qualified.
 2. **Connected planning** uses the manually dispatched `protected-apply` workflow at the current protected-main SHA. The canonical `trusted-build` environment federates a plan-only identity and compiles the exact seven versioned manifests plus an exact non-secret string map into a mode-`0600` variable file outside the checkout. Recovery context is read from root-trust outputs with the plan identity. Policy rejects deletion or replacement. Evidence directly hashes the JSON plan and each manifest; its source SHA binds the policy, compiler, tooling, workflow, and OpenTofu source in that commit. Because `tofu show -json` omits expression operators and other apply-time HCL details, `plan-source-check` also compares every HCL byte and the provider lock embedded in the saved-plan archive with the reviewed root. The one-day bundle binds that binary plan's SHA-256, resolved-variable digest, root, backend coordinates, run, and six-hour expiry.
 3. **Application** is a separate manual dispatch using the `infrastructure-apply` environment and identity with independent reviewers. The caller supplies the successful plan-only run ID and reviewed saved-plan SHA-256. Apply verifies that run's event, protected-main source, workflow path, status, artifact name, provenance, expiry, and every bundle hash before accepting a canonical receipt signed by two distinct named ECDSA P-256 approvers. The receipt is valid for at most two hours and binds the exact source SHA, root, saved-plan digest, and plan run. Receipt verification is the immediately preceding step before workload-identity exchange; the saved binary is then applied without replanning.
 
@@ -34,11 +34,12 @@ The workforce pool and its exported administrator-group `principalSet` are authe
 
 ## Local source checks
 
-The repository-local `flake.nix` and `flake.lock` are the sole system-toolchain
-authority for supported `aarch64-darwin` and `x86_64-linux` hosts. The flake
-exposes the reviewed toolchain package, identical default/CI shell closures,
-formatter, and toolchain/source checks while preserving Go modules, OpenTofu
-provider locks, and Bazel as their native dependency authorities:
+The repository-local `flake.nix` and `flake.lock`, constrained by the
+checked-in generated estate policy, are the system-toolchain authority for
+supported `aarch64-darwin`, `aarch64-linux`, and `x86_64-linux` hosts. The
+flake exposes the reviewed toolchain package, identical default/CI shell
+closures, formatter, and toolchain/source checks while preserving Go modules,
+OpenTofu provider locks, and Bazel as their native dependency authorities:
 
 ```bash
 nix build --no-accept-flake-config --no-update-lock-file .#toolchain
@@ -59,7 +60,13 @@ just validate
 just test
 ```
 
-Generated plans, state, backend files, credentials, OpenTofu provider locks, and evidence are deliberately ignored and must remain outside the tracked tree. `MODULE.bazel.lock` is reviewed source and must remain tracked. OpenTofu validation installs Google provider `7.42.0` only from the temporary verified mirror after matching the package itself to `5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171` (`linux_amd64`) or `f028a366d9c7f427d3ed1a34df22c4476b6ebed4e8884b23e448ef1fb170eb44` (`darwin_arm64`). Merely finding a checksum in a generated provider lock is not qualification. Do not run `tofu apply`, state operations, import, destroy, force-unlock, or backend migration as ordinary development commands.
+The four files under `generated/` are immutable local copies of the
+`mindclade/.github` policy projection pinned to implementation revision
+`49a015c2c0cdd6a75a5756eb8c1e95b49d117917`; evaluation never imports mutable
+remote policy. Source, Nix, and Bazel checks verify their exact byte digests,
+authority, internal lock digest, supported systems, and projected Bazel rc.
+
+Generated plans, state, backend files, credentials, OpenTofu provider locks, and evidence are deliberately ignored and must remain outside the tracked tree. `MODULE.bazel.lock` is reviewed source and must remain tracked. OpenTofu validation installs Google provider `7.42.0` only from the temporary verified mirror after matching the package itself to `528edd3c07b6a666b75e0996985656aecc443ad268ca5a027a6374e42c54a316` (`linux_arm64`), `5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171` (`linux_amd64`), or `f028a366d9c7f427d3ed1a34df22c4476b6ebed4e8884b23e448ef1fb170eb44` (`darwin_arm64`). Merely finding a checksum in a generated provider lock is not qualification. Do not run `tofu apply`, state operations, import, destroy, force-unlock, or backend migration as ordinary development commands.
 
 Remote Bazel execution and remote caching are intentionally disabled. They may be enabled only after workers contain the exact reviewed Nix store paths or use an immutable, digest-pinned image built from this toolchain closure; the worker image and platform properties must then become reviewed lock inputs.
 

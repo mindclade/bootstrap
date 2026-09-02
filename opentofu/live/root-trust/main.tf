@@ -90,6 +90,18 @@ variable "bootstrap" {
       repository_id        = string
       repository_owner_id  = string
       branch_ref           = string
+      visibility_transition = object({
+        state                       = string
+        activation_enabled          = bool
+        source_visibility           = string
+        final_visibility            = string
+        executor_repository_enabled = bool
+        executor_repository_id      = optional(string)
+        required_reviewer_gates     = list(string)
+        visibility_evidence_digest  = optional(string)
+        reviewer_evidence_digest    = optional(string)
+        blockers                    = list(string)
+      })
       pool_ids = object({
         plan     = string
         apply    = string
@@ -230,6 +242,20 @@ variable "bootstrap" {
           rotation_deadline       = string
         }))
       }))
+      nix_cache = object({
+        state                     = string
+        activation_enabled        = bool
+        secret_id                 = string
+        algorithm                 = string
+        secret_storage            = string
+        secret_version_write_only = optional(number)
+        public_keys               = list(string)
+        public_key_digest         = optional(string)
+        accessor_principals       = set(string)
+        required_reviewer_gates   = list(string)
+        reviewer_evidence_digest  = optional(string)
+        blockers                  = list(string)
+      })
     })
 
     break_glass = object({
@@ -296,6 +322,15 @@ variable "workforce_oidc_client_secret" {
     condition     = length(var.workforce_oidc_client_secret) >= 32 && !can(regex("[\\r\\n]", var.workforce_oidc_client_secret))
     error_message = "workforce_oidc_client_secret must be a high-entropy single-line value of at least 32 characters."
   }
+}
+
+variable "nix_cache_signing_private_key" {
+  description = "Nix Ed25519 private signing key supplied only for an explicitly activated write-only Secret Manager version."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+  default     = null
+  nullable    = true
 }
 
 variable "workforce_oidc_client_secret_version" {
@@ -561,20 +596,21 @@ module "github_federation" {
     apply    = var.bootstrap.projects.root_state.id
     recovery = var.bootstrap.projects.recovery.id
   }
-  issuer_uri           = var.bootstrap.github.issuer_uri
-  repository_full_name = var.bootstrap.github.repository_full_name
-  repository_id        = var.bootstrap.github.repository_id
-  repository_owner_id  = var.bootstrap.github.repository_owner_id
-  branch_ref           = var.bootstrap.github.branch_ref
-  pool_ids             = var.bootstrap.github.pool_ids
-  provider_ids         = var.bootstrap.github.provider_ids
-  service_account_ids  = var.bootstrap.github.service_account_ids
-  audiences            = var.bootstrap.github.audiences
-  workflow_refs        = var.bootstrap.github.workflow_refs
-  github_config        = var.bootstrap.github_config
-  infrastructure_live  = var.bootstrap.github_infrastructure
-  ci_evidence          = var.bootstrap.github_ci_evidence
-  activation           = var.bootstrap.github_activation
+  issuer_uri            = var.bootstrap.github.issuer_uri
+  repository_full_name  = var.bootstrap.github.repository_full_name
+  repository_id         = var.bootstrap.github.repository_id
+  repository_owner_id   = var.bootstrap.github.repository_owner_id
+  branch_ref            = var.bootstrap.github.branch_ref
+  pool_ids              = var.bootstrap.github.pool_ids
+  provider_ids          = var.bootstrap.github.provider_ids
+  service_account_ids   = var.bootstrap.github.service_account_ids
+  audiences             = var.bootstrap.github.audiences
+  workflow_refs         = var.bootstrap.github.workflow_refs
+  visibility_transition = var.bootstrap.github.visibility_transition
+  github_config         = var.bootstrap.github_config
+  infrastructure_live   = var.bootstrap.github_infrastructure
+  ci_evidence           = var.bootstrap.github_ci_evidence
+  activation            = var.bootstrap.github_activation
 
   depends_on = [google_project_service.identity, google_project_service.state]
 }
@@ -733,8 +769,11 @@ module "signing_root" {
   disabled_signing_keys = toset([
     "connected-observation-evidence",
     "infrastructure-export",
+    "supply-chain-provenance",
   ])
-  labels = var.bootstrap.labels
+  nix_cache_signing_private_key = var.nix_cache_signing_private_key
+  nix_cache                     = var.bootstrap.signing.nix_cache
+  labels                        = var.bootstrap.labels
 
   depends_on = [module.github_federation]
 }

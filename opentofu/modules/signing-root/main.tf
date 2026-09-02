@@ -11,6 +11,7 @@ locals {
     "cloudkms.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
+    "secretmanager.googleapis.com",
     "serviceusage.googleapis.com",
   ])
 
@@ -90,6 +91,63 @@ resource "google_kms_key_ring" "signing" {
   location = var.location
 
   depends_on = [google_project_service.required["cloudkms.googleapis.com"]]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_secret_manager_secret" "nix_cache_signing" {
+  project             = google_project.signing.project_id
+  secret_id           = var.nix_cache.secret_id
+  deletion_protection = true
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.location
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required["secretmanager.googleapis.com"]]
+
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition = (
+        !var.nix_cache.activation_enabled ||
+        (
+          var.nix_cache_signing_private_key != null &&
+          try(startswith(var.nix_cache_signing_private_key, "${split(":", var.nix_cache.public_keys[0])[0]}:"), false)
+        )
+      )
+      error_message = "Activated Nix cache signing requires an ephemeral private key whose name matches the first committed public key."
+    }
+  }
+}
+
+resource "google_secret_manager_secret_version" "nix_cache_signing" {
+  for_each = var.nix_cache.activation_enabled ? { active = true } : {}
+
+  secret                 = google_secret_manager_secret.nix_cache_signing.id
+  secret_data_wo         = var.nix_cache_signing_private_key
+  secret_data_wo_version = var.nix_cache.secret_version_write_only
+  deletion_policy        = "DISABLE"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "nix_cache_accessor" {
+  for_each = var.nix_cache.activation_enabled ? var.nix_cache.accessor_principals : toset([])
+
+  project   = google_project.signing.project_id
+  secret_id = google_secret_manager_secret.nix_cache_signing.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = each.value
 
   lifecycle {
     prevent_destroy = true

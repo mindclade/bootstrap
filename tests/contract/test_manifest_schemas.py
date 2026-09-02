@@ -1,6 +1,7 @@
 # pyright: basic, reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 """Contract tests for the exact bootstrap tree and manifest schemas."""
 
+import base64
 import hashlib
 import json
 import os
@@ -134,6 +135,7 @@ def valid_render_values():
         "KMS_ADMIN_PRINCIPAL_2": "group:kms-security@example.com",
         "RECOVERY_ADMIN_GROUP": "group:recovery-administrators@example.com",
         "RECOVERY_EVIDENCE_SIGNER": "serviceAccount:recovery-signer@mindclade-signing-root.iam.gserviceaccount.com",
+        "SUPPLY_CHAIN_PROVENANCE_SIGNER": "serviceAccount:supply-chain-signer@mindclade-signing-root.iam.gserviceaccount.com",
         "RECOVERY_EXPORT_KMS_KEY": "recovery-export",
         "RECOVERY_STATE_BUCKET": "mindclade-recovery-state",
         "RECOVERY_STATE_KMS_KEY": "recovery-state",
@@ -212,6 +214,7 @@ def valid_recovery_context(values):
                 "github-config-plan-evidence",
                 "infrastructure-export",
                 "recovery-evidence",
+                "supply-chain-provenance",
             )
         },
     }
@@ -449,7 +452,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         result = self.validate(self.repository_root)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["files"], 112)
+        self.assertEqual(payload["files"], 117)
         self.assertEqual(payload["manifests"], 7)
 
     @unittest.skipIf(
@@ -1036,6 +1039,133 @@ class ManifestSchemaContractTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("exactly a 90-day activation window", result.stderr)
 
+    def test_private_bootstrap_visibility_qualification_is_source_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clone = Path(directory) / "bootstrap"
+            shutil.copytree(
+                self.repository_root,
+                clone,
+                ignore=shutil.ignore_patterns(
+                    ".git", ".terraform", ".terraform.lock.hcl", "bazel-*", "__pycache__"
+                ),
+            )
+            path = clone / "manifests" / "identity-federation.yaml"
+            content = path.read_text(encoding="utf-8")
+            content = content.replace(
+                "    state: AWAITING_PRIVATE_VISIBILITY\n    activationEnabled: false",
+                "    state: PRIVATE_QUALIFIED\n    activationEnabled: true",
+                1,
+            )
+            content = content.replace(
+                "    visibilityEvidenceDigest: null\n    reviewerEvidenceDigest: null\n"
+                "    blockers:\n      - private-visibility-not-evidenced\n"
+                "      - independent-review-not-evidenced",
+                f"    visibilityEvidenceDigest: {'a' * 64}\n"
+                f"    reviewerEvidenceDigest: {'b' * 64}\n    blockers: []",
+                1,
+            )
+            path.write_text(content, encoding="utf-8")
+
+            rendered, output = self.render_root(
+                directory,
+                valid_render_values(),
+                repository_root=clone,
+            )
+            self.assertEqual(rendered.returncode, 0, rendered.stderr + rendered.stdout)
+            transition = json.loads(output.read_text(encoding="utf-8"))["bootstrap"]["github"][
+                "visibility_transition"
+            ]
+            self.assertEqual(transition["state"], "PRIVATE_QUALIFIED")
+            self.assertTrue(transition["activation_enabled"])
+            self.assertEqual(transition["final_visibility"], "private")
+            self.assertFalse(transition["executor_repository_enabled"])
+
+    def test_nix_cache_signing_activation_is_source_ready_and_digest_bound(self):
+        public_key = "mindclade-cache-v1:" + base64.b64encode(bytes([1]) * 32).decode("ascii")
+        public_key_digest = (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps([public_key], separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+        )
+        disabled = (
+            "    state: DISABLED\n"
+            "    activationEnabled: false\n"
+            "    secretId: nix-cache-signing-key\n"
+            "    algorithm: ED25519\n"
+            "    secretStorage: SECRET_MANAGER_WRITE_ONLY\n"
+            "    secretVersionWriteOnly: null\n"
+            "    publicKeys: []\n"
+            "    publicKeyDigest: null\n"
+            "    accessorPrincipals: []\n"
+            "    requiredReviewerGates:\n"
+            "      - security\n"
+            "      - platform\n"
+            "    reviewerEvidenceDigest: null\n"
+            "    blockers:\n"
+            "      - cache-public-key-not-committed\n"
+            "      - secret-version-not-created\n"
+            "      - independent-review-not-evidenced"
+        )
+        activated = (
+            "    state: ACTIVATED\n"
+            "    activationEnabled: true\n"
+            "    secretId: nix-cache-signing-key\n"
+            "    algorithm: ED25519\n"
+            "    secretStorage: SECRET_MANAGER_WRITE_ONLY\n"
+            "    secretVersionWriteOnly: 1\n"
+            "    publicKeys:\n"
+            f"      - {public_key}\n"
+            f"    publicKeyDigest: {public_key_digest}\n"
+            "    accessorPrincipals:\n"
+            "      - serviceAccount:nix-cache-publisher@mindclade-signing-root.iam.gserviceaccount.com\n"
+            "    requiredReviewerGates:\n"
+            "      - security\n"
+            "      - platform\n"
+            f"    reviewerEvidenceDigest: {'c' * 64}\n"
+            "    blockers: []"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            clone = Path(directory) / "bootstrap"
+            shutil.copytree(
+                self.repository_root,
+                clone,
+                ignore=shutil.ignore_patterns(
+                    ".git", ".terraform", ".terraform.lock.hcl", "bazel-*", "__pycache__"
+                ),
+            )
+            path = clone / "manifests" / "signing-roots.yaml"
+            content = path.read_text(encoding="utf-8")
+            self.assertIn(disabled, content)
+            path.write_text(content.replace(disabled, activated, 1), encoding="utf-8")
+
+            rendered, output = self.render_root(
+                directory,
+                valid_render_values(),
+                repository_root=clone,
+            )
+            self.assertEqual(rendered.returncode, 0, rendered.stderr + rendered.stdout)
+            root = json.loads(output.read_text(encoding="utf-8"))["bootstrap"]["signing"][
+                "nix_cache"
+            ]
+            self.assertEqual(root["state"], "ACTIVATED")
+            self.assertEqual(root["public_key_digest"], public_key_digest)
+            self.assertEqual(root["public_keys"], [public_key])
+
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(public_key_digest, "d" * 64, 1),
+                encoding="utf-8",
+            )
+            rejected, rejected_output = self.render_root(
+                directory,
+                valid_render_values(),
+                output_name="rejected.auto.tfvars.json",
+                repository_root=clone,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("canonical publicKeys JSON array", rejected.stderr)
+            self.assertFalse(rejected_output.exists())
+
     def test_signing_rotation_requires_a_bounded_overlap(self):
         declaration = (
             "        v20260829:\n"
@@ -1404,6 +1534,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                     "github-config-plan-evidence",
                     "infrastructure-export",
                     "recovery-evidence",
+                    "supply-chain-provenance",
                 },
             )
             activation = first_payload["bootstrap"]["github_activation"]
@@ -1630,6 +1761,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
                     "github-config-plan-evidence",
                     "infrastructure-export",
                     "recovery-evidence",
+                    "supply-chain-provenance",
                 },
             )
             self.assertEqual(

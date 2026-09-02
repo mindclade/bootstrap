@@ -12,10 +12,11 @@
   outputs =
     { self, nixpkgs }:
     let
-      systems = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
+      policy = import ./generated/nix-bazel-policy.nix;
+      manifestDefaults = builtins.fromJSON (
+        builtins.readFile ./generated/toolchain-manifest.defaults.json
+      );
+      systems = policy.spec.systems;
       forAllSystems =
         function:
         builtins.listToAttrs (
@@ -25,26 +26,20 @@
           }) systems
         );
     in
+    assert nixpkgs.rev == policy.spec.nixpkgs.revision;
+    assert nixpkgs.narHash == policy.spec.nixpkgs.nar_hash;
+    assert policy.generated.authority_revision == "49a015c2c0cdd6a75a5756eb8c1e95b49d117917";
+    assert manifestDefaults.authority.revision == policy.generated.authority_revision;
     {
       packages = forAllSystems (
         system: pkgs:
         let
-          biomeTarget =
-            {
-              aarch64-darwin = {
-                asset = "biome-darwin-arm64";
-                hash = "sha256-UA/Ij/QJJe1CKtzKa4o+kFJu6QTSuhCw7eDNBl/KPSs=";
-              };
-              x86_64-linux = {
-                asset = "biome-linux-x64";
-                hash = "sha256-klh/rBAuM8v4qx/bSIT49Ny/ERcln8bezVy1tfXkjmc=";
-              };
-            }
-            .${system};
-          biome = pkgs.runCommand "biome-2.3.11" { } ''
+          biomePolicy = policy.spec.tools.biome;
+          biomeTarget = biomePolicy.targets.${system};
+          biome = pkgs.runCommand "biome-${biomePolicy.version}" { } ''
             install -D -m 0755 ${
               pkgs.fetchurl {
-                url = "https://github.com/biomejs/biome/releases/download/%40biomejs/biome%402.3.11/${biomeTarget.asset}";
+                url = "https://github.com/biomejs/biome/releases/download/%40biomejs/biome%40${biomePolicy.version}/${biomeTarget.asset}";
                 inherit (biomeTarget) hash;
               }
             } "$out/bin/biome"
@@ -54,6 +49,10 @@
               aarch64-darwin = {
                 asset = "Darwin_arm64";
                 hash = "sha256-eDAtBF8OxS6XhqBsbGIaxFFrTF3R5U78gFDIbCm5ZNk=";
+              };
+              aarch64-linux = {
+                asset = "Linux_arm64";
+                hash = "sha256-O5w1Ij/jX5mI4VPN/7AUT5ESATBsdGdYtzvoKDHFQ9k=";
               };
               x86_64-linux = {
                 asset = "Linux_x86_64";
@@ -80,22 +79,12 @@
                 tar -xzf "$archive" -C "$TMPDIR/unpack"
                 install -D -m 0755 "$TMPDIR/unpack/conftest" "$out/bin/conftest"
               '';
-          opaTarget =
-            {
-              aarch64-darwin = {
-                asset = "opa_darwin_arm64";
-                hash = "sha256-K4BdR2CZ+Bgo4KckZvI7fF9wNejlGCP14e88v08jIc4=";
-              };
-              x86_64-linux = {
-                asset = "opa_linux_amd64";
-                hash = "sha256-SBTKr4kGK5kp5zc8dF6xtzvoqjR75h2gZJH2j+kQJFs=";
-              };
-            }
-            .${system};
-          opa = pkgs.runCommand "opa-1.20.1" { } ''
+          opaPolicy = policy.spec.tools.opa;
+          opaTarget = opaPolicy.targets.${system};
+          opa = pkgs.runCommand "opa-${opaPolicy.version}" { } ''
             install -D -m 0755 ${
               pkgs.fetchurl {
-                url = "https://github.com/open-policy-agent/opa/releases/download/v1.20.1/${opaTarget.asset}";
+                url = "https://github.com/open-policy-agent/opa/releases/download/v${opaPolicy.version}/${opaTarget.asset}";
                 inherit (opaTarget) hash;
               }
             } "$out/bin/opa"
@@ -105,6 +94,10 @@
               aarch64-darwin = {
                 asset = "darwin_arm64";
                 hash = "sha256-4IPuQ3kKueGa1m2ZM+JKckShQS4dVyjzeZmuIWP9rJU=";
+              };
+              aarch64-linux = {
+                asset = "linux_arm64";
+                hash = "sha256-5XOXm6aKF/57iBdSBRppSn782XDjlSH2old1GXhh7U0=";
               };
               x86_64-linux = {
                 asset = "linux_amd64";
@@ -186,6 +179,9 @@
               schema_version = "mindclade-toolchain.v1";
               repository = "mindclade/bootstrap";
               inherit system;
+              authority = manifestDefaults.authority;
+              supported_systems = manifestDefaults.supported_systems;
+              lock_digests = manifestDefaults.locks;
               nixpkgs = {
                 revision = nixpkgs.rev;
                 nar_hash = nixpkgs.narHash;
@@ -337,7 +333,13 @@
                 grep -Fq 'go_sdk.download(version = "1.26.7")' ${self}/MODULE.bazel
                 grep -Fq 'python_version = "3.14.7"' ${self}/MODULE.bazel
                 grep -Fq 'bazel test' ${self}/justfile
-                jq -e '.schema_version == "mindclade-toolchain.v1" and .bazel.version == "9.1.1"' \
+                jq -e '
+                  .schema_version == "mindclade-toolchain.v1" and
+                  .bazel.version == "9.1.1" and
+                  (.supported_systems == ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]) and
+                  .authority.revision == "49a015c2c0cdd6a75a5756eb8c1e95b49d117917" and
+                  (.authority.policy_digest | test("^sha256:[0-9a-f]{64}$"))
+                ' \
                   ${toolchain}/share/mindclade/toolchain-manifest.json >/dev/null
                 mkdir -p "$out"
                 printf '%s\n' '${nixpkgs.rev}' > "$out/nixpkgs-revision"
@@ -358,6 +360,8 @@
                 conftest verify --policy ${self}/policy > "$out/policy-verify.txt"
                 conftest test ${self}/manifests --policy ${self}/policy --all-namespaces \
                   > "$out/policy-test.txt"
+                python3 ${self}/tests/contract/test_generated_policy.py \
+                  > "$out/generated-policy.txt" 2>&1
               '';
         }
       );
