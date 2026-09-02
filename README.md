@@ -62,7 +62,7 @@ just test
 
 The four files under `generated/` are immutable local copies of the
 `mindclade/.github` policy projection pinned to implementation revision
-`b4d28faa5fde98087f60262110a43f25f6da9eb8`; evaluation never imports mutable
+`49a015c2c0cdd6a75a5756eb8c1e95b49d117917`; evaluation never imports mutable
 remote policy. Source, Nix, and Bazel checks verify their exact byte digests,
 authority, internal lock digest, supported systems, and projected Bazel rc.
 

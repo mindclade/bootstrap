@@ -28,7 +28,7 @@
     in
     assert nixpkgs.rev == policy.spec.nixpkgs.revision;
     assert nixpkgs.narHash == policy.spec.nixpkgs.nar_hash;
-    assert policy.generated.authority_revision == "b4d28faa5fde98087f60262110a43f25f6da9eb8";
+    assert policy.generated.authority_revision == "49a015c2c0cdd6a75a5756eb8c1e95b49d117917";
     assert manifestDefaults.authority.revision == policy.generated.authority_revision;
     {
       packages = forAllSystems (
@@ -337,7 +337,7 @@
                   .schema_version == "mindclade-toolchain.v1" and
                   .bazel.version == "9.1.1" and
                   (.supported_systems == ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]) and
-                  .authority.revision == "b4d28faa5fde98087f60262110a43f25f6da9eb8" and
+                  .authority.revision == "49a015c2c0cdd6a75a5756eb8c1e95b49d117917" and
                   (.authority.policy_digest | test("^sha256:[0-9a-f]{64}$"))
                 ' \
                   ${toolchain}/share/mindclade/toolchain-manifest.json >/dev/null

@@ -9,13 +9,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 GENERATED = ROOT / "generated"
-AUTHORITY_REVISION = "b4d28faa5fde98087f60262110a43f25f6da9eb8"
+AUTHORITY_REVISION = "49a015c2c0cdd6a75a5756eb8c1e95b49d117917"
 EXPECTED_SYSTEMS = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
 EXPECTED_SHA256 = {
     "bazelrc.common": "e030d15a440dd58298a6189677876f91a24b3dbde9f1c2ec77d1591deb6555f7",
-    "nix-bazel-policy.lock.json": "2b62ba1f6d731678b97035cc89d2f1433b9c00eaa9a3b2332ceb167bc30f2f87",
-    "nix-bazel-policy.nix": "bed186e83238be6fe3e889e3725176cc7d3baa09966d076e79c990d5d719d1df",
-    "toolchain-manifest.defaults.json": "95f211ac10d3b8b720299d78dee78f8e6270ccc04539177d223b833b2641c76c",
+    "nix-bazel-policy.lock.json": "845d49667310d831801fef34ff25987030208897218d6a5e4e7588db410b9738",
+    "nix-bazel-policy.nix": "94de498e988895621a349236a1cea5b8937ea318d8b985e7fec7ac3bcb414c19",
+    "toolchain-manifest.defaults.json": "bc423d86c527398dd6c8c72131e63bd54961380809fbb0712982b2dae3ee8c2f",
 }
 EXPECTED_ARTIFACT_KEYS = {
     ".github/actions/required-workflow-profile/profiles.generated.json",
