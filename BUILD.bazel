@@ -8,6 +8,7 @@ filegroup(
         [
             ".github/**",
             ".vscode/**",
+            "generated/**",
             "manifests/**",
             "opentofu/**",
             "policy/**",
@@ -37,6 +38,13 @@ filegroup(
         "justfile",
         "pyproject.toml",
     ],
+)
+
+py_test(
+    name = "generated_policy_contract_test",
+    srcs = ["tests/contract/test_generated_policy.py"],
+    data = [":ring0_source"],
+    main = "tests/contract/test_generated_policy.py",
 )
 
 py_test(
@@ -82,6 +90,7 @@ py_test(
 test_suite(
     name = "tests",
     tests = [
+        ":generated_policy_contract_test",
         ":isolated_restore_test",
         ":manifest_schema_contract_test",
         ":minimum_privilege_plan_test",

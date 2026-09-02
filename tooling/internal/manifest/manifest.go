@@ -41,6 +41,7 @@ var expectedFiles = []string{
 	".github/CODEOWNERS", ".github/actionlint.yaml", ".github/dependabot.yml", ".github/pull_request_template.md",
 	".github/workflows/protected-apply.yml", ".github/workflows/pull-request.yml", ".github/workflows/recovery-verification.yml",
 	".gitignore", "BUILD.bazel", "CONTRIBUTING.md", "LICENSE", "MODULE.bazel", "MODULE.bazel.lock", "README.md", "SECURITY.md", "biome.json", "component.yaml", "flake.lock", "flake.nix", "justfile", "pyproject.toml",
+	"generated/bazelrc.common", "generated/nix-bazel-policy.lock.json", "generated/nix-bazel-policy.nix", "generated/toolchain-manifest.defaults.json",
 	"manifests/audit-roots.yaml", "manifests/break-glass-roles.yaml", "manifests/identity-federation.yaml",
 	"manifests/recovery-policy.yaml", "manifests/signing-roots.yaml", "manifests/state-backends.yaml", "manifests/trust-anchors.yaml",
 	"opentofu/live/recovery-plane/backend.tf", "opentofu/live/recovery-plane/main.tf", "opentofu/live/recovery-plane/outputs.tf",
@@ -63,7 +64,7 @@ var expectedFiles = []string{
 	"runbooks/break-glass-activation.md", "runbooks/root-identity-compromise.md", "runbooks/signing-root-recovery.md", "runbooks/state-backend-unavailable.md",
 	"schemas/v1/audit_root.schema.json", "schemas/v1/break_glass.schema.json", "schemas/v1/federation.schema.json",
 	"schemas/v1/recovery_policy.schema.json", "schemas/v1/signing_root.schema.json", "schemas/v1/state_backend.schema.json", "schemas/v1/trust_anchor.schema.json",
-	"tests/contract/test_manifest_schemas.py", "tests/failure/test_partial_bootstrap_apply.py", "tests/plan/test_minimum_privilege.py", "tests/recovery/test_isolated_restore.py",
+	"tests/contract/test_generated_policy.py", "tests/contract/test_manifest_schemas.py", "tests/failure/test_partial_bootstrap_apply.py", "tests/plan/test_minimum_privilege.py", "tests/recovery/test_isolated_restore.py",
 	"tooling/BUILD.bazel", "tooling/cmd/bootstrapctl/main.go", "tooling/go.mod", "tooling/go.sum",
 	"tooling/internal/evidence/evidence.go", "tooling/internal/manifest/manifest.go", "tooling/internal/plan/plan.go", "tooling/internal/recovery/recovery.go",
 }

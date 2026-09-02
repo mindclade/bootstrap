@@ -52,6 +52,7 @@ validate-tofu:
     @validation_dir="$(mktemp -d)"; trap 'rm -rf "$validation_dir"' EXIT; \
       cp -R opentofu manifests "$validation_dir/"; \
       case "$(uname -s)/$(uname -m)" in \
+        Linux/aarch64) provider_platform="linux_arm64"; provider_checksum="528edd3c07b6a666b75e0996985656aecc443ad268ca5a027a6374e42c54a316" ;; \
         Linux/x86_64) provider_platform="linux_amd64"; provider_checksum="5b4bac33f039f94384a0b3468f63266fac023f69c00ebbc573d957b861f67171" ;; \
         Darwin/arm64) provider_platform="darwin_arm64"; provider_checksum="f028a366d9c7f427d3ed1a34df22c4476b6ebed4e8884b23e448ef1fb170eb44" ;; \
         *) printf 'unsupported provider qualification platform: %s/%s\n' "$(uname -s)" "$(uname -m)" >&2; exit 1 ;; \
@@ -103,6 +104,7 @@ test-go:
 
 test-python:
     PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+      tests/contract/test_generated_policy.py \
       tests/contract/test_manifest_schemas.py \
       tests/plan/test_minimum_privilege.py \
       tests/failure/test_partial_bootstrap_apply.py \
