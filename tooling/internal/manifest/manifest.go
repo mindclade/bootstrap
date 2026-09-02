@@ -492,7 +492,7 @@ var workflowContracts = map[string]workflowContract{
 		environments: map[string]string{},
 		actions:      []string{},
 		reusableJobs: map[string]string{
-			"validate": "mindclade/.github/.github/workflows/reusable-nix-validation.yml@f9b6ebcecd197157d9466eeacf8e2864e32c9a79",
+			"validate": "mindclade/.github/.github/workflows/reusable-nix-validation.yml@fc5af9efc19b47078fe446feee750d7f4973195b",
 		},
 	},
 	".github/workflows/protected-apply.yml": {
