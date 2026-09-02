@@ -491,7 +491,7 @@ var workflowContracts = map[string]workflowContract{
 		environments: map[string]string{},
 		actions:      []string{},
 		reusableJobs: map[string]string{
-			"validate": "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
+			"validate": "mindclade/.github/.github/workflows/reusable-nix-validation.yml@f9b6ebcecd197157d9466eeacf8e2864e32c9a79",
 		},
 	},
 	".github/workflows/protected-apply.yml": {
@@ -1117,6 +1117,19 @@ func validateDependabot(root string) error {
 	}
 	if !reflect.DeepEqual(actual, expected) {
 		return errors.New(".github/dependabot.yml ecosystems and roots must equal the exact approved set")
+	}
+	moduleContent, err := os.ReadFile(filepath.Join(root, "MODULE.bazel"))
+	if err != nil {
+		return fmt.Errorf("read MODULE.bazel for Dependabot compatibility: %w", err)
+	}
+	for _, required := range []string{
+		`go_mod_from_file = "//tooling:go.mod"`,
+		`go_sum_from_file = "//tooling:go.sum"`,
+		`go_deps.from_file(go_mod = go_mod_from_file)`,
+	} {
+		if !bytes.Contains(moduleContent, []byte(required)) {
+			return errors.New("MODULE.bazel must preserve the Dependabot Bazel file staging contract")
+		}
 	}
 	return nil
 }

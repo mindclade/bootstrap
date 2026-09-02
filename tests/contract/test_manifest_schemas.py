@@ -844,7 +844,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         )
         self.assertTrue(workflow.startswith("name: Pull request\n"))
         self.assertIn(
-            "mindclade/.github/.github/workflows/reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
+            "mindclade/.github/.github/workflows/reusable-nix-validation.yml@f9b6ebcecd197157d9466eeacf8e2864e32c9a79",
             workflow,
         )
         self.assertIn("VALIDATE_RESULT: ${{ needs.validate.result }}", workflow)
@@ -854,7 +854,7 @@ class ManifestSchemaContractTest(unittest.TestCase):
         cases = (
             (
                 ".github/workflows/pull-request.yml",
-                "reusable-nix-validation.yml@c097ef86c25991a400050c13e78574e8d3d8c071",
+                "reusable-nix-validation.yml@f9b6ebcecd197157d9466eeacf8e2864e32c9a79",
                 "reusable-nix-validation.yml@main",
                 "exact approved reusable workflow",
             ),
@@ -947,6 +947,12 @@ class ManifestSchemaContractTest(unittest.TestCase):
                 "package-ecosystem: opentofu",
                 "package-ecosystem: terraform",
                 "ecosystems and roots",
+            ),
+            (
+                "MODULE.bazel",
+                'go_sum_from_file = "//tooling:go.sum"',
+                'go_sum_path = "//tooling:go.sum"',
+                "Dependabot Bazel file staging contract",
             ),
         )
         for path_name, original, replacement, diagnostic in cases:
